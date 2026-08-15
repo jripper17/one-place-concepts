@@ -27,9 +27,9 @@ export default function Home() {
   const [fileMessage, setFileMessage] = useState("");
   const [reportClient, setReportClient] = useState("");
   const [federalTaxRate, setFederalTaxRate] = useState(25);
-  const [mrrDrafts, setMrrDrafts] = useState<Record<number, string>>({});
-  const [savingMrrId, setSavingMrrId] = useState<number | null>(null);
-  const [savedMrrId, setSavedMrrId] = useState<number | null>(null);
+  const [editingClientId, setEditingClientId] = useState<number | null>(null);
+  const [clientDraft, setClientDraft] = useState({ hourlyRate: "", monthlyRecurringRevenue: "" });
+  const [savingClient, setSavingClient] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
 
@@ -54,21 +54,22 @@ export default function Home() {
     setSyncing(false);
   }
 
-  async function changeRate(id: number, hourlyRate: number) {
-    const response = await fetch("/api/clients", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, hourlyRate }) });
-    if (response.ok) setClients(list => list.map(c => c.id === id ? { ...c, hourlyRate } : c));
+  function editClient(client: Client) {
+    setEditingClientId(client.id);
+    setClientDraft({ hourlyRate: String(client.hourlyRate), monthlyRecurringRevenue: String(client.monthlyRecurringRevenue ?? 0) });
   }
 
-  async function changeMrr(id: number) {
-    const monthlyRecurringRevenue = Number(mrrDrafts[id] ?? clients.find(c => c.id === id)?.monthlyRecurringRevenue ?? 0);
-    if (!Number.isFinite(monthlyRecurringRevenue) || monthlyRecurringRevenue < 0) return;
-    setSavingMrrId(id); setSavedMrrId(null);
-    const response = await fetch("/api/clients", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, monthlyRecurringRevenue }) });
+  async function saveClient(client: Client) {
+    const hourlyRate = Number(clientDraft.hourlyRate);
+    const monthlyRecurringRevenue = Number(clientDraft.monthlyRecurringRevenue);
+    if (![hourlyRate, monthlyRecurringRevenue].every(value => Number.isFinite(value) && value >= 0)) return;
+    setSavingClient(true);
+    const response = await fetch("/api/clients", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, hourlyRate, monthlyRecurringRevenue }) });
     if (response.ok) {
-      setClients(list => list.map(c => c.id === id ? { ...c, monthlyRecurringRevenue } : c));
-      setSavedMrrId(id); setTimeout(() => setSavedMrrId(current => current === id ? null : current), 2200);
+      setClients(list => list.map(c => c.id === client.id ? { ...c, hourlyRate, monthlyRecurringRevenue } : c));
+      setEditingClientId(null);
     }
-    setSavingMrrId(null);
+    setSavingClient(false);
   }
 
   async function saveTaxRate(rate: number) {
@@ -234,10 +235,12 @@ export default function Home() {
         <article className="panel mrr-summary"><div><p className="eyebrow">MONTHLY RECURRING REVENUE</p><h2>{money.format(metrics.monthlyRecurringRevenue)} MRR</h2><p>Fixed recurring revenue across {clients.filter(c => c.monthlyRecurringRevenue > 0).length} clients.</p></div><span>Annualized: <strong>{money.format(metrics.monthlyRecurringRevenue * 12)}</strong></span></article>
         <div className="client-cards">{(clients.length ? clients : byClient.map((c, i) => ({ id: -i-1, ninjaOneId: null, name: c.name, description: "", hourlyRate: c.rate, monthlyRecurringRevenue: 0, active: true, syncedAt: null }))).map((c, i) => {
           const activity = byClient.find(b => b.name === c.name);
-          return <article className="panel client-card" key={c.id}>
-            <div className={`big-badge c${i%3}`}>{c.name[0]}</div><div><h2>{c.name}</h2><p>{c.ninjaOneId ? `NinjaOne organization #${c.ninjaOneId}` : c.description || "Client"}</p></div>
-            <div className="rate"><span>Hourly rate</span><label className="inline-rate">$ <input type="number" min="0" value={c.hourlyRate} disabled={c.id < 0} onChange={e => changeRate(c.id, Number(e.target.value))}/></label></div>
-            <div className="rate mrr-rate"><span>Monthly recurring revenue</span><div className="mrr-control"><label className="inline-rate">$ <input type="number" min="0" value={mrrDrafts[c.id] ?? String(c.monthlyRecurringRevenue ?? 0)} disabled={c.id < 0} onChange={e => setMrrDrafts(drafts => ({ ...drafts, [c.id]: e.target.value }))}/></label><button type="button" disabled={c.id < 0 || savingMrrId === c.id} onClick={() => changeMrr(c.id)}>{savingMrrId === c.id ? "Saving…" : savedMrrId === c.id ? "✓ Saved" : "Save"}</button></div></div>
+          const editing = editingClientId === c.id;
+          return <article className={`panel client-card ${editing ? "editing" : ""}`} key={c.id}>
+            <div className={`big-badge c${i%3}`}>{c.name[0]}</div><div className="client-card-head"><div><h2>{c.name}</h2><p>{c.ninjaOneId ? `NinjaOne organization #${c.ninjaOneId}` : c.description || "Client"}</p></div>{!editing && <button className="client-edit" type="button" disabled={c.id < 0} onClick={() => editClient(c)}>Edit client</button>}</div>
+            <div className="rate"><span>Hourly billing rate</span>{editing ? <label className="inline-rate">$ <input type="number" min="0" value={clientDraft.hourlyRate} onChange={e => setClientDraft(draft => ({ ...draft, hourlyRate: e.target.value }))}/></label> : <strong>{money.format(c.hourlyRate)}/hr</strong>}</div>
+            <div className="rate"><span>Monthly recurring revenue</span>{editing ? <label className="inline-rate">$ <input type="number" min="0" value={clientDraft.monthlyRecurringRevenue} onChange={e => setClientDraft(draft => ({ ...draft, monthlyRecurringRevenue: e.target.value }))}/></label> : <strong>{money.format(c.monthlyRecurringRevenue ?? 0)}</strong>}</div>
+            {editing && <div className="client-edit-actions"><button type="button" className="cancel" onClick={() => setEditingClientId(null)}>Cancel</button><button type="button" className="save-client" disabled={savingClient} onClick={() => saveClient(c)}>{savingClient ? "Saving…" : "Save changes"}</button></div>}
             <div className="rate"><span>Billable revenue this month</span><strong>{money.format(activity?.revenue ?? 0)}</strong></div><div className="rate"><span>Hours logged</span><strong>{activity?.hours ?? 0}h</strong></div>
           </article>;
         })}</div>
