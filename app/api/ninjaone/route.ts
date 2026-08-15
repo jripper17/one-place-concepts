@@ -2,13 +2,14 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { clients, teamMembers } from "../../../db/schema";
+import { microsoftUser } from "../../microsoft-auth";
 
 type NinjaEnv = { NINJAONE_INSTANCE_URL?: string; NINJAONE_CLIENT_ID?: string; NINJAONE_CLIENT_SECRET?: string };
 
 async function isManager(request: Request) {
-  const userId = request.headers.get("oai-authenticated-user-id");
-  if (!userId) return false;
-  const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, userId)).limit(1);
+  const identity = await microsoftUser(request);
+  if (!identity) return false;
+  const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, identity.userId)).limit(1);
   return member?.role === "manager";
 }
 

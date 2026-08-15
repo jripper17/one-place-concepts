@@ -19,6 +19,7 @@ export default function Home() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [user, setUser] = useState<User>({ id: 0, name: "", email: "", role: "member" });
+  const [authStatus, setAuthStatus] = useState<"loading" | "signedIn" | "signedOut">("loading");
   const [members, setMembers] = useState<Member[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [ninjaConfigured, setNinjaConfigured] = useState(false);
@@ -34,7 +35,7 @@ export default function Home() {
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
 
   useEffect(() => {
-    fetch("/api/session").then(r => r.json()).then(data => { if (!data.user) return; setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); } });
+    fetch("/api/session").then(async r => ({ ok: r.ok, data: await r.json() })).then(({ ok, data }) => { if (!ok || !data.user) { setAuthStatus("signedOut"); return; } setAuthStatus("signedIn"); setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); } }).catch(() => setAuthStatus("signedOut"));
     fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
       if (data?.entries) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);
@@ -192,6 +193,8 @@ export default function Home() {
     setFileMessage(`Word report prepared for ${selected}.`);
   }
 
+  if (authStatus !== "signedIn") return <main className="auth-page"><section className="auth-card"><img src="/opc-logo.jpeg" alt="One Place Concepts"/><p className="eyebrow">TIME & REVENUE</p><h1>{authStatus === "loading" ? "Checking your account…" : "Sign in to continue"}</h1><p>{authStatus === "loading" ? "Connecting securely." : "Use your One Place Concepts Microsoft 365 account."}</p>{authStatus === "signedOut" && <a className="microsoft-signin" href="/api/auth/microsoft/login"><span>▦</span> Sign in with Microsoft</a>}</section></main>;
+
   return <main>
     <aside className="sidebar">
       <div className="brand"><img src="/opc-logo.jpeg" alt="One Place Concepts"/><span><strong>One Place</strong><small>Concepts</small></span></div>
@@ -201,7 +204,7 @@ export default function Home() {
         {user.role === "manager" && <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Icon>◎</Icon>Clients & rates</button>}
       </nav>
       <div className="sidebar-note"><span className="pulse" /><div><strong>Forecast is live</strong><small>Updated from every entry</small></div></div>
-      <div className="profile"><span className="avatar">{(user.name || "U").slice(0,2).toUpperCase()}</span><div><strong>{user.name || "Signed-in user"}</strong><small>{user.role === "manager" ? "Manager" : "Team member"}</small></div><button aria-label="Profile options" aria-expanded={profileOpen} onClick={() => setProfileOpen(value => !value)}>•••</button>{profileOpen && <div className="profile-menu"><div><strong>{user.name || "Signed-in user"}</strong><span>{user.email}</span></div><span className="role-pill">{user.role === "manager" ? "Manager access" : "Team member"}</span><a href="/signout-with-chatgpt?return_to=/">Sign out</a></div>}</div>
+      <div className="profile"><span className="avatar">{(user.name || "U").slice(0,2).toUpperCase()}</span><div><strong>{user.name || "Signed-in user"}</strong><small>{user.role === "manager" ? "Manager" : "Team member"}</small></div><button aria-label="Profile options" aria-expanded={profileOpen} onClick={() => setProfileOpen(value => !value)}>•••</button>{profileOpen && <div className="profile-menu"><div><strong>{user.name || "Signed-in user"}</strong><span>{user.email}</span></div><span className="role-pill">{user.role === "manager" ? "Manager access" : "Team member"}</span><a href="/api/auth/microsoft/logout">Sign out</a></div>}</div>
     </aside>
 
     <section className="workspace">

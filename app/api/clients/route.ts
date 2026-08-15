@@ -1,11 +1,12 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { clients, teamMembers } from "../../../db/schema";
+import { microsoftUser } from "../../microsoft-auth";
 
 async function viewer(request: Request) {
-  const userId = request.headers.get("oai-authenticated-user-id");
-  if (!userId) return null;
-  const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, userId)).limit(1);
+  const identity = await microsoftUser(request);
+  if (!identity) return null;
+  const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, identity.userId)).limit(1);
   return member;
 }
 

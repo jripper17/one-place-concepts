@@ -1,11 +1,12 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { businessSettings, teamMembers } from "../../../db/schema";
+import { microsoftUser } from "../../microsoft-auth";
 
 async function manager(request: Request) {
-  const userId = request.headers.get("oai-authenticated-user-id");
-  if (!userId) return false;
-  const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, userId)).limit(1);
+  const identity = await microsoftUser(request);
+  if (!identity) return false;
+  const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, identity.userId)).limit(1);
   return member?.role === "manager";
 }
 

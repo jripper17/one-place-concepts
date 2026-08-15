@@ -1,12 +1,12 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { clients, teamMembers, timeEntries } from "../../../db/schema";
+import { microsoftUser } from "../../microsoft-auth";
 
 async function viewer(request: Request) {
-  const authenticatedUserId = request.headers.get("oai-authenticated-user-id");
-  const host = request.headers.get("host") ?? "";
-  if (!authenticatedUserId && !host.startsWith("localhost")) return null;
-  const userId = authenticatedUserId ?? "local-owner";
+  const identity = await microsoftUser(request);
+  if (!identity) return null;
+  const userId = identity.userId;
   const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, userId)).limit(1);
   return { userId, role: member?.role ?? "member" };
 }
