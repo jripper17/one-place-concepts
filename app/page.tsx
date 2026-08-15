@@ -22,6 +22,7 @@ export default function Home() {
   const [authStatus, setAuthStatus] = useState<"loading" | "signedIn" | "signedOut">("loading");
   const [members, setMembers] = useState<Member[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [showInactiveClients, setShowInactiveClients] = useState(false);
   const [ninjaConfigured, setNinjaConfigured] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
@@ -79,6 +80,12 @@ export default function Home() {
     setSavingClient(false);
   }
 
+  async function setClientActive(client: Client, active: boolean) {
+    if (!window.confirm(`${active ? "Restore" : "Hide"} ${client.name}? Historical time entries will be preserved.`)) return;
+    const response = await fetch("/api/clients", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, active }) });
+    if (response.ok) setClients(list => list.map(item => item.id === client.id ? { ...item, active } : item));
+  }
+
   async function saveTaxRate(rate: number) {
     setFederalTaxRate(rate);
     await fetch("/api/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ federalTaxRate: rate }) });
@@ -91,7 +98,7 @@ export default function Home() {
     const elapsedWorkdays = 10;
     const totalWorkdays = 21;
     const forecast = Math.round((earned / elapsedWorkdays) * totalWorkdays);
-    const monthlyRecurringRevenue = clients.reduce((sum, client) => sum + Number(client.monthlyRecurringRevenue || 0), 0);
+    const monthlyRecurringRevenue = clients.filter(client => client.active).reduce((sum, client) => sum + Number(client.monthlyRecurringRevenue || 0), 0);
     const currentMonthRevenue = earned + monthlyRecurringRevenue;
     return { billableHours, totalHours, earned, forecast, monthlyRecurringRevenue, currentMonthRevenue, totalForecast: forecast + monthlyRecurringRevenue, estimatedFederalTax: currentMonthRevenue * federalTaxRate / 100, utilization: totalHours ? Math.round((billableHours / totalHours) * 100) : 0, remaining: totalWorkdays - elapsedWorkdays };
   }, [entries, clients, federalTaxRate]);
@@ -102,7 +109,7 @@ export default function Home() {
   }, {})).sort((a, b) => b.revenue - a.revenue), [entries]);
 
   function openNewEntry() {
-    const firstClient = clients[0];
+    const firstClient = clients.find(client => client.active);
     setEditingEntry(null);
     setForm({ date: new Date().toISOString().slice(0, 10), client: firstClient?.name ?? "Internal", project: "", description: "", hours: "", rate: String(firstClient?.hourlyRate ?? 0), billable: Boolean(firstClient) });
     setOpen(true);
@@ -242,12 +249,12 @@ export default function Home() {
 
       {view === "clients" && user.role === "manager" && <>
         <article className="panel ninja-panel"><div><span className="ninja-mark">N</span><div><h2>NinjaOne client sync</h2><p>{ninjaConfigured ? "Connected securely · Organizations become One Place Concepts clients" : "Ready to connect · API credentials are still required"}</p></div></div><button className="primary" disabled={!ninjaConfigured || syncing} onClick={syncNinjaOne}>{syncing ? "Syncing…" : "↻ Sync clients"}</button>{syncMessage && <small className="sync-message">{syncMessage}</small>}</article>
-        <article className="panel mrr-summary"><div><p className="eyebrow">MONTHLY RECURRING REVENUE</p><h2>{money.format(metrics.monthlyRecurringRevenue)} MRR</h2><p>Fixed recurring revenue across {clients.filter(c => c.monthlyRecurringRevenue > 0).length} clients.</p></div><span>Annualized: <strong>{money.format(metrics.monthlyRecurringRevenue * 12)}</strong></span></article>
-        <div className="client-cards">{(clients.length ? clients : byClient.map((c, i) => ({ id: -i-1, ninjaOneId: null, name: c.name, description: "", hourlyRate: c.rate, monthlyRecurringRevenue: 0, active: true, syncedAt: null }))).map((c, i) => {
+        <article className="panel mrr-summary"><div><p className="eyebrow">MONTHLY RECURRING REVENUE</p><h2>{money.format(metrics.monthlyRecurringRevenue)} MRR</h2><p>Fixed recurring revenue across {clients.filter(c => c.active && c.monthlyRecurringRevenue > 0).length} active clients.</p></div><div className="mrr-actions"><span>Annualized: <strong>{money.format(metrics.monthlyRecurringRevenue * 12)}</strong></span><button type="button" onClick={() => setShowInactiveClients(value => !value)}>{showInactiveClients ? "Hide inactive" : `Show inactive (${clients.filter(c => !c.active).length})`}</button></div></article>
+        <div className="client-cards">{(clients.length ? clients : byClient.map((c, i) => ({ id: -i-1, ninjaOneId: null, name: c.name, description: "", hourlyRate: c.rate, monthlyRecurringRevenue: 0, active: true, syncedAt: null }))).filter(c => showInactiveClients || c.active).map((c, i) => {
           const activity = byClient.find(b => b.name === c.name);
           const editing = editingClientId === c.id;
-          return <article className={`panel client-card ${editing ? "editing" : ""}`} key={c.id}>
-            <div className={`big-badge c${i%3}`}>{c.name[0]}</div><div className="client-card-head"><div><h2>{c.name}</h2><p>{c.ninjaOneId ? `NinjaOne organization #${c.ninjaOneId}` : c.description || "Client"}</p></div>{!editing && <button className="client-edit" type="button" disabled={c.id < 0} onClick={() => editClient(c)}>Edit client</button>}</div>
+          return <article className={`panel client-card ${editing ? "editing" : ""} ${!c.active ? "inactive-client" : ""}`} key={c.id}>
+            <div className={`big-badge c${i%3}`}>{c.name[0]}</div><div className="client-card-head"><div><h2>{c.name}{!c.active && <span className="inactive-pill">Inactive</span>}</h2><p>{c.ninjaOneId ? `NinjaOne organization #${c.ninjaOneId}` : c.description || "Client"}</p></div>{!editing && <div className="client-head-actions"><button className="client-edit" type="button" disabled={c.id < 0} onClick={() => editClient(c)}>Edit</button><button className={c.active ? "client-hide" : "client-restore"} type="button" disabled={c.id < 0} onClick={() => setClientActive(c, !c.active)}>{c.active ? "Hide" : "Restore"}</button></div>}</div>
             <div className="rate"><span>Hourly billing rate</span>{editing ? <label className="inline-rate">$ <input type="number" min="0" value={clientDraft.hourlyRate} onChange={e => setClientDraft(draft => ({ ...draft, hourlyRate: e.target.value }))}/></label> : <strong>{money.format(c.hourlyRate)}/hr</strong>}</div>
             <div className="rate"><span>Monthly recurring revenue</span>{editing ? <label className="inline-rate">$ <input type="number" min="0" value={clientDraft.monthlyRecurringRevenue} onChange={e => setClientDraft(draft => ({ ...draft, monthlyRecurringRevenue: e.target.value }))}/></label> : <strong>{money.format(c.monthlyRecurringRevenue ?? 0)}</strong>}</div>
             {editing && <div className="client-edit-actions"><button type="button" className="cancel" onClick={() => setEditingClientId(null)}>Cancel</button><button type="button" className="save-client" disabled={savingClient} onClick={() => saveClient(c)}>{savingClient ? "Saving…" : "Save changes"}</button></div>}
