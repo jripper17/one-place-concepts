@@ -11,6 +11,11 @@ type ProjectTask = { id: number; projectId: number; title: string; assigneeUserI
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
+function cleanEntryText(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text.toLowerCase() === "undefined" || text.toLowerCase() === "null" ? "" : text;
+}
+
 function Icon({ children }: { children: React.ReactNode }) { return <span className="icon" aria-hidden="true">{children}</span>; }
 
 export default function Home() {
@@ -47,7 +52,7 @@ export default function Home() {
   useEffect(() => {
     fetch("/api/session").then(async r => ({ ok: r.ok, data: await r.json() })).then(({ ok, data }) => { if (!ok || !data.user) { setAuthStatus("signedOut"); return; } setAuthStatus("signedIn"); setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); fetch("/api/projects").then(r => r.json()).then(p => { setProjects(p.projects ?? []); setProjectTasks(p.tasks ?? []); setProjectPeople(p.people ?? []); setProjectHours(p.entries ?? []); }); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); } }).catch(() => setAuthStatus("signedOut"));
     fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
-      if (data?.entries) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
+      if (data?.entries) setEntries(data.entries.map((e: Entry) => ({ ...e, project: cleanEntryText(e.project), description: cleanEntryText(e.description), hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);
   }, []);
 
@@ -156,6 +161,11 @@ export default function Home() {
 
   const visibleTotals = useMemo(() => ({ total: visibleEntries.reduce((sum,entry) => sum + entry.hours,0), billable: visibleEntries.filter(entry => entry.billable).reduce((sum,entry) => sum + entry.hours,0) }), [visibleEntries]);
 
+  const entryProjectOptions = useMemo(() => Array.from(new Set([
+    ...projects.filter(project => project.client === form.client).map(project => cleanEntryText(project.name)),
+    ...entries.filter(entry => entry.client === form.client).map(entry => cleanEntryText(entry.project))
+  ].filter(Boolean))).sort((a, b) => a.localeCompare(b)), [entries, form.client, projects]);
+
   function openNewEntry() {
     const firstClient = clients.find(client => client.active);
     setEditingEntry(null);
@@ -166,7 +176,7 @@ export default function Home() {
   function openEditEntry(entry: Entry) {
     const clientRate = clients.find(client => client.name === entry.client)?.hourlyRate;
     setEditingEntry(entry);
-    setForm({ date: entry.date, client: entry.client, project: entry.project, description: entry.description, hours: String(entry.hours), rate: String(clientRate ?? entry.rate), billable: entry.billable });
+    setForm({ date: entry.date, client: entry.client, project: cleanEntryText(entry.project), description: cleanEntryText(entry.description), hours: String(entry.hours), rate: String(clientRate ?? entry.rate), billable: entry.billable });
     setOpen(true);
   }
 
@@ -332,7 +342,7 @@ export default function Home() {
       </>}
     </section>
 
-    {open && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setOpen(false)}><form className="modal" onSubmit={saveEntry}><div className="modal-head"><div><p className="eyebrow">{editingEntry ? "EDIT ENTRY" : "NEW ENTRY"}</p><h2>{editingEntry ? "Update your time" : "Log your time"}</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close">×</button></div><label>Date<input type="date" required value={form.date} onChange={e => setForm({...form, date: e.target.value})}/></label><div className="form-row"><label>Client<select value={form.client} onChange={e => { const selected = clients.find(c => c.name === e.target.value); setForm({...form, client:e.target.value, rate:String(selected?.hourlyRate ?? 0)})}}>{clients.map(c => <option key={c.id}>{c.name}</option>)}<option>Internal</option></select></label><label>Project<input required value={form.project} onChange={e => setForm({...form, project:e.target.value})}/></label></div><label>What did you work on?<input autoFocus required placeholder="e.g. Client workshop and notes" value={form.description} onChange={e => setForm({...form, description:e.target.value})}/></label><div className="form-row"><label>Hours<input type="number" step="0.25" min="0.25" required placeholder="0.0" value={form.hours} onChange={e => setForm({...form, hours:e.target.value})}/></label><label>Hourly rate<input type="number" min="0" required value={form.rate} onChange={e => setForm({...form, rate:e.target.value})}/></label></div><label className="check"><input type="checkbox" checked={form.billable} onChange={e => setForm({...form, billable:e.target.checked})}/><span>Billable time</span><small>Counts toward revenue and forecast</small></label><button className="primary submit" type="submit">{editingEntry ? "Update time entry" : "Save time entry"}</button></form></div>}
+    {open && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setOpen(false)}><form className="modal" onSubmit={saveEntry}><div className="modal-head"><div><p className="eyebrow">{editingEntry ? "EDIT ENTRY" : "NEW ENTRY"}</p><h2>{editingEntry ? "Update your time" : "Log your time"}</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close">×</button></div><label>Date<input type="date" required value={form.date} onChange={e => setForm({...form, date: e.target.value})}/></label><div className="form-row"><label>Client<select value={form.client} onChange={e => { const selected = clients.find(c => c.name === e.target.value); setForm({...form, client:e.target.value, project:"", rate:String(selected?.hourlyRate ?? 0)})}}>{clients.map(c => <option key={c.id}>{c.name}</option>)}<option>Internal</option></select></label><label>Project<input required list="entry-project-options" placeholder="Choose or enter a project" value={form.project} onChange={e => setForm({...form, project:e.target.value})}/><datalist id="entry-project-options">{entryProjectOptions.map(project => <option key={project} value={project}/>)}</datalist><small>Select a previous project or type a new one.</small></label></div><label>What did you work on?<input autoFocus required placeholder="e.g. Client workshop and notes" value={form.description} onChange={e => setForm({...form, description:e.target.value})}/></label><div className="form-row"><label>Hours<input type="number" step="0.25" min="0.25" required placeholder="0.0" value={form.hours} onChange={e => setForm({...form, hours:e.target.value})}/></label><label>Hourly rate<input type="number" min="0" required value={form.rate} onChange={e => setForm({...form, rate:e.target.value})}/></label></div><label className="check"><input type="checkbox" checked={form.billable} onChange={e => setForm({...form, billable:e.target.checked})}/><span>Billable time</span><small>Counts toward revenue and forecast</small></label><button className="primary submit" type="submit">{editingEntry ? "Update time entry" : "Save time entry"}</button></form></div>}
     {saved && <div className="toast">✓ Time entry saved</div>}
   </main>;
 }
