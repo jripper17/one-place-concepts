@@ -98,7 +98,7 @@ export default function Home() {
 
   return <main>
     <aside className="sidebar">
-      <div className="brand"><span className="brandmark">T</span><span>Tempo</span></div>
+      <div className="brand"><img src="/opc-logo.jpeg" alt="One Place Concepts"/><span><strong>One Place</strong><small>Concepts</small></span></div>
       <nav aria-label="Main navigation">
         {user.role === "manager" && <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><Icon>⌁</Icon>Overview</button>}
         <button className={view === "timesheet" ? "active" : ""} onClick={() => setView("timesheet")}><Icon>▦</Icon>Timesheet</button>

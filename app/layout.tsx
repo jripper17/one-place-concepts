@@ -19,11 +19,11 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = host.startsWith("localhost") ? "http" : "https";
   const image = `${protocol}://${host}/og.png`;
   return {
-    title: "Tempo — Time & Revenue",
-    description: "Log time, track billable work, and forecast monthly revenue.",
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
-    openGraph: { title: "Tempo — Time & Revenue", description: "Know where your month is going.", images: [image] },
-    twitter: { card: "summary_large_image", title: "Tempo — Time & Revenue", description: "Know where your month is going.", images: [image] },
+    title: "One Place Concepts — Time & Revenue",
+    description: "Track time, billing, and monthly revenue for One Place Concepts.",
+    icons: { icon: "/opc-logo.jpeg", shortcut: "/opc-logo.jpeg" },
+    openGraph: { title: "One Place Concepts — Time & Revenue", description: "One place for time, billing, and revenue forecasting.", images: [image] },
+    twitter: { card: "summary_large_image", title: "One Place Concepts — Time & Revenue", description: "One place for time, billing, and revenue forecasting.", images: [image] },
   };
 }
 
