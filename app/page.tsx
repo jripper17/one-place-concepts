@@ -6,6 +6,8 @@ type Entry = { id: number; date: string; client: string; project: string; descri
 type User = { id: number; name: string; email: string; role: "manager" | "member" };
 type Member = User & { userId: string; active: boolean };
 type Client = { id: number; ninjaOneId: number | null; name: string; description: string; hourlyRate: number; monthlyRecurringRevenue: number; active: boolean; syncedAt: string | null };
+type Project = { id: number; client: string; name: string; budgetHours: number; startDate: string; dueDate: string; status: "planned" | "active" | "complete" };
+type ProjectTask = { id: number; projectId: number; title: string; assigneeUserId: string; estimatedHours: number; dueDate: string; status: "todo" | "in_progress" | "complete" };
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
@@ -13,7 +15,7 @@ function Icon({ children }: { children: React.ReactNode }) { return <span classN
 
 export default function Home() {
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [view, setView] = useState<"overview" | "timesheet" | "clients">("overview");
+  const [view, setView] = useState<"overview" | "timesheet" | "projects" | "clients">("overview");
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -32,11 +34,17 @@ export default function Home() {
   const [editingClientId, setEditingClientId] = useState<number | null>(null);
   const [clientDraft, setClientDraft] = useState({ hourlyRate: "", monthlyRecurringRevenue: "" });
   const [savingClient, setSavingClient] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([]);
+  const [projectPeople, setProjectPeople] = useState<Array<{ userId: string; name: string }>>([]);
+  const [projectHours, setProjectHours] = useState<Array<{ project: string; hours: number }>>([]);
+  const [projectForm, setProjectForm] = useState({ client: "", name: "", budgetHours: "", startDate: new Date().toISOString().slice(0,10), dueDate: "" });
+  const [taskForm, setTaskForm] = useState({ projectId: "", title: "", assigneeUserId: "", estimatedHours: "", dueDate: "" });
   const importInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
 
   useEffect(() => {
-    fetch("/api/session").then(async r => ({ ok: r.ok, data: await r.json() })).then(({ ok, data }) => { if (!ok || !data.user) { setAuthStatus("signedOut"); return; } setAuthStatus("signedIn"); setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); } }).catch(() => setAuthStatus("signedOut"));
+    fetch("/api/session").then(async r => ({ ok: r.ok, data: await r.json() })).then(({ ok, data }) => { if (!ok || !data.user) { setAuthStatus("signedOut"); return; } setAuthStatus("signedIn"); setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); fetch("/api/projects").then(r => r.json()).then(p => { setProjects(p.projects ?? []); setProjectTasks(p.tasks ?? []); setProjectPeople(p.people ?? []); setProjectHours(p.entries ?? []); }); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); } }).catch(() => setAuthStatus("signedOut"));
     fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
       if (data?.entries) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);
@@ -90,6 +98,31 @@ export default function Home() {
     setFederalTaxRate(rate);
     await fetch("/api/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ federalTaxRate: rate }) });
   }
+
+  async function createProject(event: FormEvent) {
+    event.preventDefault();
+    const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "project", ...projectForm, budgetHours: Number(projectForm.budgetHours) }) });
+    if (response.ok) { const data = await response.json(); setProjects(list => [...list, data.project]); setProjectForm({ client: "", name: "", budgetHours: "", startDate: new Date().toISOString().slice(0,10), dueDate: "" }); }
+  }
+
+  async function createTask(event: FormEvent) {
+    event.preventDefault();
+    const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "task", ...taskForm, projectId: Number(taskForm.projectId), estimatedHours: Number(taskForm.estimatedHours) }) });
+    if (response.ok) { const data = await response.json(); setProjectTasks(list => [...list, data.task]); setTaskForm({ projectId: "", title: "", assigneeUserId: "", estimatedHours: "", dueDate: "" }); }
+  }
+
+  async function changeTaskStatus(task: ProjectTask, status: ProjectTask["status"]) {
+    const response = await fetch("/api/projects", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: task.id, status }) });
+    if (response.ok) setProjectTasks(list => list.map(item => item.id === task.id ? { ...item, status } : item));
+  }
+
+  const projectStats = useMemo(() => projects.map(project => {
+    const tasks = projectTasks.filter(task => task.projectId === project.id);
+    const planned = tasks.reduce((sum, task) => sum + Number(task.estimatedHours), 0);
+    const logged = projectHours.filter(item => item.project === project.name).reduce((sum, item) => sum + Number(item.hours), 0);
+    const complete = tasks.filter(task => task.status === "complete").length;
+    return { ...project, tasks, planned, logged, complete, utilization: project.budgetHours ? Math.round(logged / project.budgetHours * 100) : 0 };
+  }), [projects, projectTasks, projectHours]);
 
   const metrics = useMemo(() => {
     const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0);
@@ -214,6 +247,7 @@ export default function Home() {
       <nav aria-label="Main navigation">
         {user.role === "manager" && <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><Icon>⌁</Icon>Overview</button>}
         <button className={view === "timesheet" ? "active" : ""} onClick={() => setView("timesheet")}><Icon>▦</Icon>Timesheet</button>
+        <button className={view === "projects" ? "active" : ""} onClick={() => setView("projects")}><Icon>✓</Icon>{user.role === "manager" ? "Projects" : "My tasks"}</button>
         {user.role === "manager" && <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Icon>◎</Icon>Clients & rates</button>}
       </nav>
       <div className="sidebar-note"><span className="pulse" /><div><strong>Forecast is live</strong><small>Updated from every entry</small></div></div>
@@ -221,7 +255,7 @@ export default function Home() {
     </aside>
 
     <section className="workspace">
-      <header><div><p className="eyebrow">AUGUST 2026</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : "Know what every hour is worth."}</p></div><button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></header>
+      <header><div><p className="eyebrow">AUGUST 2026</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : view === "projects" ? (user.role === "manager" ? "Projects & capacity" : "My tasks") : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : view === "projects" ? (user.role === "manager" ? "Forecast delivery and team utilization." : "Focus on the work assigned to you.") : "Know what every hour is worth."}</p></div><button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></header>
 
       {view === "overview" && <>
         <div className="metrics four">
@@ -246,6 +280,20 @@ export default function Home() {
       </>}
 
       {view === "timesheet" && <><article className="panel file-tools"><div><p className="eyebrow">DATA & REPORTS</p><h2>Timesheet files</h2><p>Move entries in or out of Excel, or prepare a client-ready Word detail report.</p></div><div className="file-actions"><button onClick={exportExcel} disabled={!entries.length}>⇩ Export Excel</button><button onClick={() => importInput.current?.click()}>⇧ Import Excel</button><input ref={importInput} className="sr-only" type="file" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && importExcel(e.target.files[0])}/><div className="word-export"><select aria-label="Client for Word report" value={reportClient} onChange={e => setReportClient(e.target.value)}><option value="">Select client…</option>{Array.from(new Set(entries.map(e => e.client))).sort().map(name => <option key={name}>{name}</option>)}</select><button onClick={exportWord}>⇩ Export Word</button></div></div>{fileMessage && <div className="file-message" role="status">{fileMessage}</div>}</article><article className="panel table-panel"><div className="panel-title"><div><h2>August entries</h2><p>{metrics.totalHours.toFixed(1)} total hours · {metrics.billableHours.toFixed(1)} billable</p></div><button onClick={openNewEntry}>＋ Add entry</button></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Client / project</th><th>Description</th><th>Hours</th><th>Value</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{entries.length ? entries.map(e => <tr key={e.id}><td>{new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td><td><strong>{e.client}</strong><small>{e.project}</small></td><td>{e.description}</td><td>{e.hours.toFixed(1)}</td><td>{e.billable ? money.format(e.hours * e.rate) : <span className="muted">Internal</span>}</td><td><div className="row-actions"><button onClick={() => openEditEntry(e)}>Edit</button><button className="danger" onClick={() => deleteEntry(e)}>Delete</button></div></td></tr>) : <tr><td colSpan={6} className="empty-state"><strong>No time entries yet</strong><span>Log your first entry to start tracking hours and revenue.</span></td></tr>}</tbody></table></div></article></>}
+
+      {view === "projects" && <section className="projects-view">
+        {user.role === "manager" && <div className="project-metrics">
+          <article><span>Active projects</span><strong>{projects.filter(project => project.status === "active").length}</strong></article>
+          <article><span>Planned hours</span><strong>{projectStats.reduce((sum, project) => sum + project.planned, 0).toFixed(1)}h</strong></article>
+          <article><span>Hours logged</span><strong>{projectStats.reduce((sum, project) => sum + project.logged, 0).toFixed(1)}h</strong></article>
+          <article><span>Capacity used</span><strong>{Math.round(projectStats.reduce((sum, project) => sum + project.logged, 0) / Math.max(1, projectStats.reduce((sum, project) => sum + project.budgetHours, 0)) * 100)}%</strong></article>
+        </div>}
+        {user.role === "manager" && <div className="project-create-grid">
+          <form className="panel project-form" onSubmit={createProject}><div><p className="eyebrow">NEW PROJECT</p><h2>Plan client work</h2></div><label>Client<select required value={projectForm.client} onChange={e => setProjectForm({...projectForm,client:e.target.value})}><option value="">Select client…</option>{clients.filter(c => c.active).map(c => <option key={c.id}>{c.name}</option>)}</select></label><label>Project name<input required value={projectForm.name} onChange={e => setProjectForm({...projectForm,name:e.target.value})}/></label><div className="compact-fields"><label>Budget hours<input type="number" min="0" required value={projectForm.budgetHours} onChange={e => setProjectForm({...projectForm,budgetHours:e.target.value})}/></label><label>Start<input type="date" required value={projectForm.startDate} onChange={e => setProjectForm({...projectForm,startDate:e.target.value})}/></label><label>Due<input type="date" required value={projectForm.dueDate} onChange={e => setProjectForm({...projectForm,dueDate:e.target.value})}/></label></div><button className="primary">Create project</button></form>
+          <form className="panel project-form" onSubmit={createTask}><div><p className="eyebrow">NEW TASK</p><h2>Assign team work</h2></div><label>Project<select required value={taskForm.projectId} onChange={e => setTaskForm({...taskForm,projectId:e.target.value})}><option value="">Select project…</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Task<input required value={taskForm.title} onChange={e => setTaskForm({...taskForm,title:e.target.value})}/></label><div className="compact-fields"><label>Assignee<select required value={taskForm.assigneeUserId} onChange={e => setTaskForm({...taskForm,assigneeUserId:e.target.value})}><option value="">Select person…</option>{projectPeople.map(person => <option key={person.userId} value={person.userId}>{person.name}</option>)}</select></label><label>Est. hours<input type="number" min="0" required value={taskForm.estimatedHours} onChange={e => setTaskForm({...taskForm,estimatedHours:e.target.value})}/></label><label>Due<input type="date" required value={taskForm.dueDate} onChange={e => setTaskForm({...taskForm,dueDate:e.target.value})}/></label></div><button className="primary">Add task</button></form>
+        </div>}
+        <div className="project-list">{projectStats.length ? projectStats.map(project => <article className="panel project-card" key={project.id}><div className="project-head"><div><p className="eyebrow">{project.client}</p><h2>{project.name}</h2><span>Due {new Date(project.dueDate+"T12:00:00").toLocaleDateString()}</span></div>{user.role === "manager" && <div className="project-progress"><strong>{project.utilization}%</strong><span>of {project.budgetHours}h budget</span></div>}</div>{user.role === "manager" && <div className="project-bars"><div><span>Logged {project.logged.toFixed(1)}h</span><span>Budget {project.budgetHours}h</span></div><i><b style={{width:`${Math.min(100,project.utilization)}%`}}/></i><small>{project.complete} of {project.tasks.length} tasks complete · {Math.max(0,project.budgetHours-project.logged).toFixed(1)}h remaining</small></div>}<div className="task-list">{project.tasks.length ? project.tasks.map(task => <div className="task-row" key={task.id}><div><strong>{task.title}</strong><span>{projectPeople.find(person => person.userId === task.assigneeUserId)?.name ?? (user.role === "member" ? "Assigned to you" : "Team member")} · {task.estimatedHours}h · Due {new Date(task.dueDate+"T12:00:00").toLocaleDateString()}</span></div><select aria-label={`Status for ${task.title}`} value={task.status} onChange={e => changeTaskStatus(task,e.target.value as ProjectTask["status"])}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="complete">Complete</option></select></div>) : <p className="no-tasks">No tasks assigned yet.</p>}</div></article>) : <article className="panel empty-projects"><h2>{user.role === "manager" ? "No projects yet" : "No tasks assigned"}</h2><p>{user.role === "manager" ? "Create a project to begin forecasting delivery and utilization." : "Your manager can assign work from the Projects view."}</p></article>}</div>
+      </section>}
 
       {view === "clients" && user.role === "manager" && <>
         <article className="panel ninja-panel"><div><span className="ninja-mark">N</span><div><h2>NinjaOne client sync</h2><p>{ninjaConfigured ? "Connected securely · Organizations become One Place Concepts clients" : "Ready to connect · API credentials are still required"}</p></div></div><button className="primary" disabled={!ninjaConfigured || syncing} onClick={syncNinjaOne}>{syncing ? "Syncing…" : "↻ Sync clients"}</button>{syncMessage && <small className="sync-message">{syncMessage}</small>}</article>

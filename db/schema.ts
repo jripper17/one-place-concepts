@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const teamMembers = sqliteTable("team_members", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -36,3 +36,23 @@ export const businessSettings = sqliteTable("business_settings", {
   id: integer("id").primaryKey().default(1),
   federalTaxRate: real("federal_tax_rate").notNull().default(25),
 });
+
+export const projects = sqliteTable("projects", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  client: text("client").notNull(),
+  name: text("name").notNull(),
+  budgetHours: real("budget_hours").notNull().default(0),
+  startDate: text("start_date").notNull(),
+  dueDate: text("due_date").notNull(),
+  status: text("status", { enum: ["planned", "active", "complete"] }).notNull().default("active"),
+});
+
+export const projectTasks = sqliteTable("project_tasks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id").notNull().references(() => projects.id),
+  title: text("title").notNull(),
+  assigneeUserId: text("assignee_user_id").notNull(),
+  estimatedHours: real("estimated_hours").notNull().default(0),
+  dueDate: text("due_date").notNull(),
+  status: text("status", { enum: ["todo", "in_progress", "complete"] }).notNull().default("todo"),
+}, table => [index("idx_project_tasks_project_id").on(table.projectId), index("idx_project_tasks_assignee").on(table.assigneeUserId)]);
