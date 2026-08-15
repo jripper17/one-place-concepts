@@ -84,7 +84,8 @@ export default function Home() {
     const totalWorkdays = 21;
     const forecast = Math.round((earned / elapsedWorkdays) * totalWorkdays);
     const monthlyRecurringRevenue = clients.reduce((sum, client) => sum + Number(client.monthlyRecurringRevenue || 0), 0);
-    return { billableHours, totalHours, earned, forecast, monthlyRecurringRevenue, totalForecast: forecast + monthlyRecurringRevenue, estimatedFederalTax: earned * federalTaxRate / 100, utilization: totalHours ? Math.round((billableHours / totalHours) * 100) : 0, remaining: totalWorkdays - elapsedWorkdays };
+    const currentMonthRevenue = earned + monthlyRecurringRevenue;
+    return { billableHours, totalHours, earned, forecast, monthlyRecurringRevenue, currentMonthRevenue, totalForecast: forecast + monthlyRecurringRevenue, estimatedFederalTax: currentMonthRevenue * federalTaxRate / 100, utilization: totalHours ? Math.round((billableHours / totalHours) * 100) : 0, remaining: totalWorkdays - elapsedWorkdays };
   }, [entries, clients, federalTaxRate]);
 
   const byClient = useMemo(() => Object.values(entries.filter(e => e.billable).reduce<Record<string, { name: string; hours: number; revenue: number; rate: number }>>((acc, e) => {
@@ -209,7 +210,7 @@ export default function Home() {
           <article><div className="metric-top"><span>Revenue earned</span><span className="trend">↗ 8.2%</span></div><strong>{money.format(metrics.earned)}</strong><small>From {metrics.billableHours.toFixed(1)} billable hours</small></article>
           <article className="hero-metric"><div className="metric-top"><span>Month forecast</span><span className="live">● LIVE</span></div><strong>{money.format(metrics.totalForecast)}</strong><div className="forecast-track"><i style={{ width: `${metrics.totalForecast ? Math.min(100, (metrics.earned + metrics.monthlyRecurringRevenue) / metrics.totalForecast * 100) : 0}%` }} /></div><small>{money.format(metrics.forecast)} projected billable + {money.format(metrics.monthlyRecurringRevenue)} MRR</small></article>
           <article><div className="metric-top"><span>Billable utilization</span><span className="target">Target 80%</span></div><strong>{metrics.utilization}%</strong><small>{metrics.billableHours.toFixed(1)} of {metrics.totalHours.toFixed(1)} hours</small></article>
-          <article className="tax-metric"><div className="metric-top"><span>Estimated federal tax</span><label className="tax-rate"><input aria-label="Estimated federal tax rate" type="number" min="0" max="100" step="1" value={federalTaxRate} onChange={e => saveTaxRate(Number(e.target.value))}/>%</label></div><strong>{money.format(metrics.estimatedFederalTax)}</strong><small>{federalTaxRate}% of {money.format(metrics.earned)} billable revenue · planning estimate only</small></article>
+          <article className="tax-metric"><div className="metric-top"><span>Estimated federal tax</span><label className="tax-rate"><input aria-label="Estimated federal tax rate" type="number" min="0" max="100" step="1" value={federalTaxRate} onChange={e => saveTaxRate(Number(e.target.value))}/>%</label></div><strong>{money.format(metrics.estimatedFederalTax)}</strong><small>{federalTaxRate}% of {money.format(metrics.currentMonthRevenue)} total revenue (billable + MRR) · planning estimate only</small></article>
         </div>
 
         <div className="grid">
