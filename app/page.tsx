@@ -30,7 +30,7 @@ export default function Home() {
   const [form, setForm] = useState({ date: "2026-08-15", client: "Northstar Labs", project: "Product strategy", description: "", hours: "", rate: "185", billable: true });
 
   useEffect(() => {
-    fetch("/api/session").then(r => r.json()).then(data => { setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); if (data.user.role === "manager") fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); });
+    fetch("/api/session").then(r => r.json()).then(data => { if (!data.user) return; setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); if (data.user.role === "manager") fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); });
     fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
       if (data?.entries?.length) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);

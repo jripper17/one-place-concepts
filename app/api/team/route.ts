@@ -3,7 +3,10 @@ import { getDb } from "../../../db";
 import { teamMembers } from "../../../db/schema";
 
 async function currentManager(request: Request) {
-  const userId = request.headers.get("oai-authenticated-user-id") ?? "local-owner";
+  const authenticatedUserId = request.headers.get("oai-authenticated-user-id");
+  const host = request.headers.get("host") ?? "";
+  if (!authenticatedUserId && !host.startsWith("localhost")) return false;
+  const userId = authenticatedUserId ?? "local-owner";
   const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, userId)).limit(1);
   return member?.role === "manager";
 }
