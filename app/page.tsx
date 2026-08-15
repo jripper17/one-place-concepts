@@ -16,6 +16,7 @@ export default function Home() {
   const [view, setView] = useState<"overview" | "timesheet" | "clients">("overview");
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [user, setUser] = useState<User>({ id: 0, name: "", email: "", role: "member" });
   const [members, setMembers] = useState<Member[]>([]);
@@ -104,7 +105,7 @@ export default function Home() {
         {user.role === "manager" && <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Icon>◎</Icon>Clients & rates</button>}
       </nav>
       <div className="sidebar-note"><span className="pulse" /><div><strong>Forecast is live</strong><small>Updated from every entry</small></div></div>
-      <div className="profile"><span className="avatar">{(user.name || "U").slice(0,2).toUpperCase()}</span><div><strong>{user.name || "Signed-in user"}</strong><small>{user.role === "manager" ? "Manager" : "Team member"}</small></div><button aria-label="Profile options">•••</button></div>
+      <div className="profile"><span className="avatar">{(user.name || "U").slice(0,2).toUpperCase()}</span><div><strong>{user.name || "Signed-in user"}</strong><small>{user.role === "manager" ? "Manager" : "Team member"}</small></div><button aria-label="Profile options" aria-expanded={profileOpen} onClick={() => setProfileOpen(value => !value)}>•••</button>{profileOpen && <div className="profile-menu"><div><strong>{user.name || "Signed-in user"}</strong><span>{user.email}</span></div><span className="role-pill">{user.role === "manager" ? "Manager access" : "Team member"}</span><a href="/signout-with-chatgpt?return_to=/">Sign out</a></div>}</div>
     </aside>
 
     <section className="workspace">
