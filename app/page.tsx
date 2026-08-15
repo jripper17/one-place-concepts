@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Entry = { id: number; date: string; client: string; project: string; description: string; hours: number; rate: number; billable: boolean };
 type User = { id: number; name: string; email: string; role: "manager" | "member" };
@@ -24,6 +24,9 @@ export default function Home() {
   const [ninjaConfigured, setNinjaConfigured] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const [fileMessage, setFileMessage] = useState("");
+  const [reportClient, setReportClient] = useState("");
+  const importInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
 
   useEffect(() => {
@@ -96,6 +99,74 @@ export default function Home() {
     if (response.ok) setEntries(prev => prev.filter(e => e.id !== entry.id));
   }
 
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = filename; link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportExcel() {
+    const XLSX = await import("xlsx");
+    const rows = entries.map(e => ({ Date: e.date, Client: e.client, Project: e.project, Description: e.description, Hours: e.hours, "Hourly Rate": e.rate, Billable: e.billable ? "Yes" : "No" }));
+    const sheet = XLSX.utils.json_to_sheet(rows, { header: ["Date", "Client", "Project", "Description", "Hours", "Hourly Rate", "Billable"] });
+    sheet["!cols"] = [{wch:12},{wch:24},{wch:24},{wch:48},{wch:10},{wch:14},{wch:10}];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Time Entries");
+    XLSX.writeFile(workbook, `one-place-timesheet-${new Date().toISOString().slice(0,10)}.xlsx`);
+    setFileMessage(`${entries.length} entries exported to Excel.`);
+  }
+
+  async function importExcel(file: File) {
+    setFileMessage("Reading Excel file…");
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+      const normalized = rows.map((row, index) => {
+        const rawDate = row.Date;
+        const date = rawDate instanceof Date ? rawDate.toISOString().slice(0,10) : String(rawDate).slice(0,10);
+        const billableText = String(row.Billable).trim().toLowerCase();
+        return { id: 0, date, client: String(row.Client).trim(), project: String(row.Project).trim(), description: String(row.Description).trim(), hours: Number(row.Hours), rate: Number(row["Hourly Rate"] ?? 0), billable: ["yes","true","1","y"].includes(billableText), row: index + 2 };
+      });
+      const invalid = normalized.find(e => !e.date || !e.client || !e.project || !e.description || !Number.isFinite(e.hours) || e.hours <= 0 || !Number.isFinite(e.rate));
+      if (invalid) throw new Error(`Row ${invalid.row} is missing a required value or has invalid hours/rate.`);
+      const responses = [];
+      for (const entry of normalized) {
+        const response = await fetch("/api/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(entry) });
+        if (!response.ok) throw new Error(`Could not import row ${entry.row}.`);
+        responses.push((await response.json()).entry as Entry);
+      }
+      setEntries(prev => [...responses.reverse(), ...prev]);
+      setFileMessage(`${responses.length} entries imported successfully.`);
+    } catch (error) { setFileMessage(error instanceof Error ? error.message : "The Excel file could not be imported."); }
+    finally { if (importInput.current) importInput.current.value = ""; }
+  }
+
+  async function exportWord() {
+    const selected = reportClient || Array.from(new Set(entries.map(e => e.client))).sort()[0];
+    const clientEntries = entries.filter(e => e.client === selected).sort((a,b) => a.date.localeCompare(b.date));
+    if (!selected || !clientEntries.length) { setFileMessage("Choose a client that has time entries."); return; }
+    const { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType, HeadingLevel, AlignmentType, ShadingType } = await import("docx");
+    const total = clientEntries.reduce((sum,e) => sum + e.hours, 0);
+    const header = (text: string) => new TableCell({ shading: { type: ShadingType.CLEAR, fill: "122D3A" }, children: [new Paragraph({ children: [new TextRun({ text, bold: true, color: "FFFFFF" })] })] });
+    const rows = clientEntries.map(e => new TableRow({ children: [
+      new TableCell({ children: [new Paragraph(new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US"))] }),
+      new TableCell({ children: [new Paragraph(e.project)] }),
+      new TableCell({ children: [new Paragraph(e.description)] }),
+      new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, text: e.hours.toFixed(2) })] })
+    ] }));
+    const doc = new Document({ sections: [{ properties: {}, children: [
+      new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun({ text: "Time Entry Details", color: "122D3A" })] }),
+      new Paragraph({ children: [new TextRun({ text: selected, bold: true, size: 28, color: "76AD22" })], spacing: { after: 160 } }),
+      new Paragraph({ children: [new TextRun({ text: `Total hours: ${total.toFixed(2)}`, bold: true })], spacing: { after: 240 } }),
+      new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ tableHeader: true, children: [header("Date"), header("Project"), header("Time entry details"), header("Hours")] }), ...rows] })
+    ] }] });
+    downloadBlob(await Packer.toBlob(doc), `${selected.replace(/[^a-z0-9]+/gi,"-").toLowerCase()}-time-details.docx`);
+    setFileMessage(`Word report prepared for ${selected}.`);
+  }
+
   return <main>
     <aside className="sidebar">
       <div className="brand"><img src="/opc-logo.jpeg" alt="One Place Concepts"/><span><strong>One Place</strong><small>Concepts</small></span></div>
@@ -132,7 +203,7 @@ export default function Home() {
         <article className="panel client-snapshot"><div className="panel-title"><div><h2>Client snapshot</h2><p>Revenue contribution this month</p></div><button onClick={() => setView("clients")}>Manage clients →</button></div><div className="client-bars">{byClient.map((c, i) => <div className="client-bar" key={c.name}><span className={`client-badge c${i}`}>{c.name[0]}</span><strong>{c.name}</strong><div className="bar"><i style={{ width: `${c.revenue / byClient[0].revenue * 100}%` }}/></div><span>{c.hours}h</span><b>{money.format(c.revenue)}</b></div>)}</div></article>
       </>}
 
-      {view === "timesheet" && <article className="panel table-panel"><div className="panel-title"><div><h2>August entries</h2><p>{metrics.totalHours.toFixed(1)} total hours · {metrics.billableHours.toFixed(1)} billable</p></div><button onClick={openNewEntry}>＋ Add entry</button></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Client / project</th><th>Description</th><th>Hours</th><th>Value</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{entries.length ? entries.map(e => <tr key={e.id}><td>{new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td><td><strong>{e.client}</strong><small>{e.project}</small></td><td>{e.description}</td><td>{e.hours.toFixed(1)}</td><td>{e.billable ? money.format(e.hours * e.rate) : <span className="muted">Internal</span>}</td><td><div className="row-actions"><button onClick={() => openEditEntry(e)}>Edit</button><button className="danger" onClick={() => deleteEntry(e)}>Delete</button></div></td></tr>) : <tr><td colSpan={6} className="empty-state"><strong>No time entries yet</strong><span>Log your first entry to start tracking hours and revenue.</span></td></tr>}</tbody></table></div></article>}
+      {view === "timesheet" && <><article className="panel file-tools"><div><p className="eyebrow">DATA & REPORTS</p><h2>Timesheet files</h2><p>Move entries in or out of Excel, or prepare a client-ready Word detail report.</p></div><div className="file-actions"><button onClick={exportExcel} disabled={!entries.length}>⇩ Export Excel</button><button onClick={() => importInput.current?.click()}>⇧ Import Excel</button><input ref={importInput} className="sr-only" type="file" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && importExcel(e.target.files[0])}/><div className="word-export"><select aria-label="Client for Word report" value={reportClient} onChange={e => setReportClient(e.target.value)}><option value="">Select client…</option>{Array.from(new Set(entries.map(e => e.client))).sort().map(name => <option key={name}>{name}</option>)}</select><button onClick={exportWord}>⇩ Export Word</button></div></div>{fileMessage && <div className="file-message" role="status">{fileMessage}</div>}</article><article className="panel table-panel"><div className="panel-title"><div><h2>August entries</h2><p>{metrics.totalHours.toFixed(1)} total hours · {metrics.billableHours.toFixed(1)} billable</p></div><button onClick={openNewEntry}>＋ Add entry</button></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Client / project</th><th>Description</th><th>Hours</th><th>Value</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{entries.length ? entries.map(e => <tr key={e.id}><td>{new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td><td><strong>{e.client}</strong><small>{e.project}</small></td><td>{e.description}</td><td>{e.hours.toFixed(1)}</td><td>{e.billable ? money.format(e.hours * e.rate) : <span className="muted">Internal</span>}</td><td><div className="row-actions"><button onClick={() => openEditEntry(e)}>Edit</button><button className="danger" onClick={() => deleteEntry(e)}>Delete</button></div></td></tr>) : <tr><td colSpan={6} className="empty-state"><strong>No time entries yet</strong><span>Log your first entry to start tracking hours and revenue.</span></td></tr>}</tbody></table></div></article></>}
 
       {view === "clients" && user.role === "manager" && <><article className="panel ninja-panel"><div><span className="ninja-mark">N</span><div><h2>NinjaOne client sync</h2><p>{ninjaConfigured ? "Connected securely · Organizations become Tempo clients" : "Ready to connect · API credentials are still required"}</p></div></div><button className="primary" disabled={!ninjaConfigured || syncing} onClick={syncNinjaOne}>{syncing ? "Syncing…" : "↻ Sync clients"}</button>{syncMessage && <small className="sync-message">{syncMessage}</small>}</article><div className="client-cards">{(clients.length ? clients : byClient.map((c, i) => ({ id: -i-1, ninjaOneId: null, name: c.name, description: "", hourlyRate: c.rate, active: true, syncedAt: null }))).map((c, i) => { const activity = byClient.find(b => b.name === c.name); return <article className="panel client-card" key={c.id}><div className={`big-badge c${i%3}`}>{c.name[0]}</div><div><h2>{c.name}</h2><p>{c.ninjaOneId ? `NinjaOne organization #${c.ninjaOneId}` : c.description || "Tempo client"}</p></div><div className="rate"><span>Hourly rate</span><label className="inline-rate">$ <input type="number" min="0" value={c.hourlyRate} disabled={c.id < 0} onChange={e => changeRate(c.id, Number(e.target.value))}/></label></div><div className="rate"><span>August revenue</span><strong>{money.format(activity?.revenue ?? 0)}</strong></div><div className="rate"><span>Hours logged</span><strong>{activity?.hours ?? 0}h</strong></div></article>})}</div><article className="panel team-access"><div className="panel-title"><div><h2>Team access</h2><p>Choose who can see business-wide revenue, forecasts, clients, and rates.</p></div></div><div className="members">{members.map(m => <div className="member" key={m.id}><span className="avatar">{m.name.slice(0,2).toUpperCase()}</span><div><strong>{m.name}</strong><small>{m.email}</small></div><select aria-label={`Role for ${m.name}`} value={m.role} disabled={m.id === user.id} onChange={e => changeRole(m.id, e.target.value as "manager" | "member")}><option value="member">Team member — timesheet only</option><option value="manager">Manager — full access</option></select></div>)}</div></article></>}
     </section>
