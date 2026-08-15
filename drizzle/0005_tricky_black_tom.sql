@@ -1,0 +1,1 @@
+ALTER TABLE `team_members` ADD `active` integer DEFAULT true NOT NULL;

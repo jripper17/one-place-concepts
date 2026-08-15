@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Entry = { id: number; date: string; client: string; project: string; description: string; hours: number; rate: number; billable: boolean };
 type User = { id: number; name: string; email: string; role: "manager" | "member" };
-type Member = User & { userId: string };
+type Member = User & { userId: string; active: boolean };
 type Client = { id: number; ninjaOneId: number | null; name: string; description: string; hourlyRate: number; monthlyRecurringRevenue: number; active: boolean; syncedAt: string | null };
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -44,6 +44,12 @@ export default function Home() {
   async function changeRole(id: number, role: "manager" | "member") {
     const response = await fetch("/api/team", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, role }) });
     if (response.ok) setMembers(list => list.map(m => m.id === id ? { ...m, role } : m));
+  }
+
+  async function removeMember(member: Member) {
+    if (!window.confirm(`Remove access for ${member.name}? They will no longer be able to use the application.`)) return;
+    const response = await fetch(`/api/team?id=${member.id}`, { method: "DELETE" });
+    if (response.ok) setMembers(list => list.filter(item => item.id !== member.id));
   }
 
   async function syncNinjaOne() {
@@ -248,7 +254,7 @@ export default function Home() {
             <div className="rate"><span>Billable revenue this month</span><strong>{money.format(activity?.revenue ?? 0)}</strong></div><div className="rate"><span>Hours logged</span><strong>{activity?.hours ?? 0}h</strong></div>
           </article>;
         })}</div>
-        <article className="panel team-access"><div className="panel-title"><div><h2>Team access</h2><p>Choose who can see business-wide revenue, forecasts, clients, and rates.</p></div></div><div className="members">{members.map(m => <div className="member" key={m.id}><span className="avatar">{m.name.slice(0,2).toUpperCase()}</span><div><strong>{m.name}</strong><small>{m.email}</small></div><select aria-label={`Role for ${m.name}`} value={m.role} disabled={m.id === user.id} onChange={e => changeRole(m.id, e.target.value as "manager" | "member")}><option value="member">Team member — timesheet only</option><option value="manager">Manager — full access</option></select></div>)}</div></article>
+        <article className="panel team-access"><div className="panel-title"><div><h2>Team access</h2><p>Choose roles or remove access for team members and old accounts.</p></div></div><div className="members">{members.map(m => <div className="member" key={m.id}><span className="avatar">{m.name.slice(0,2).toUpperCase()}</span><div><strong>{m.name}{m.id === user.id ? " (you)" : ""}</strong><small>{m.email}</small></div><select aria-label={`Role for ${m.name}`} value={m.role} disabled={m.id === user.id} onChange={e => changeRole(m.id, e.target.value as "manager" | "member")}><option value="member">Team member — timesheet only</option><option value="manager">Manager — full access</option></select><button className="remove-member" type="button" disabled={m.id === user.id} onClick={() => removeMember(m)}>Remove access</button></div>)}</div></article>
       </>}
     </section>
 

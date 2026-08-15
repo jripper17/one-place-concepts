@@ -8,6 +8,7 @@ async function viewer(request: Request) {
   if (!identity) return null;
   const userId = identity.userId;
   const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, userId)).limit(1);
+  if (member && !member.active) return null;
   return { userId, role: member?.role ?? "member" };
 }
 

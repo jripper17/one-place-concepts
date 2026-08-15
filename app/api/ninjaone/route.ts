@@ -10,7 +10,7 @@ async function isManager(request: Request) {
   const identity = await microsoftUser(request);
   if (!identity) return false;
   const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, identity.userId)).limit(1);
-  return member?.role === "manager";
+  return member?.active === true && member.role === "manager";
 }
 
 function settings() {

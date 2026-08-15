@@ -6,6 +6,7 @@ export const teamMembers = sqliteTable("team_members", {
   email: text("email").notNull(),
   name: text("name").notNull(),
   role: text("role", { enum: ["manager", "member"] }).notNull().default("member"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
 }, table => [uniqueIndex("idx_team_members_user_id").on(table.userId)]);
 
 export const clients = sqliteTable("clients", {

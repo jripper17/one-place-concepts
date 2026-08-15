@@ -7,7 +7,7 @@ async function viewer(request: Request) {
   const identity = await microsoftUser(request);
   if (!identity) return null;
   const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, identity.userId)).limit(1);
-  return member;
+  return member?.active ? member : null;
 }
 
 export async function GET(request: Request) {

@@ -14,6 +14,7 @@ export async function GET(request: Request) {
       const ownerEmail = microsoftConfig().MICROSOFT_OWNER_EMAIL?.toLowerCase();
       [member] = await db.insert(teamMembers).values({ ...user, role: Number(count) === 0 || user.email === ownerEmail ? "manager" : "member" }).returning();
     }
+    if (!member.active) return Response.json({ error: "Your access has been removed. Contact a manager." }, { status: 403 });
     return Response.json({ user: member });
   } catch { return Response.json({ error: "Could not load your account" }, { status: 500 }); }
 }
