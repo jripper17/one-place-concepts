@@ -46,6 +46,7 @@ export default function Home() {
   const [projectForm, setProjectForm] = useState({ client: "", name: "", budgetHours: "", startDate: new Date().toISOString().slice(0,10), dueDate: "" });
   const [taskForm, setTaskForm] = useState({ projectId: "", title: "", assigneeUserId: "", estimatedHours: "", dueDate: "" });
   const [timesheetFilter, setTimesheetFilter] = useState({ client: "", project: "", month: "", from: "", to: "", sort: "date_desc" });
+  const [overviewMonth, setOverviewMonth] = useState(new Date().toISOString().slice(0, 7));
   const importInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
 
@@ -130,22 +131,30 @@ export default function Home() {
     return { ...project, tasks, planned, logged, complete, utilization: project.budgetHours ? Math.round(logged / project.budgetHours * 100) : 0 };
   }), [projects, projectTasks, projectHours]);
 
+  const overviewEntries = useMemo(() => entries.filter(entry => entry.date.startsWith(overviewMonth)), [entries, overviewMonth]);
+  const overviewMonthLabel = useMemo(() => new Date(`${overviewMonth}-02T12:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" }), [overviewMonth]);
+  const overviewMonthShort = useMemo(() => new Date(`${overviewMonth}-02T12:00:00`).toLocaleDateString("en-US", { month: "short" }), [overviewMonth]);
+  const overviewMonthDays = useMemo(() => { const [year, month] = overviewMonth.split("-").map(Number); return new Date(year, month, 0).getDate(); }, [overviewMonth]);
+
   const metrics = useMemo(() => {
-    const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0);
-    const totalHours = entries.reduce((s, e) => s + e.hours, 0);
-    const earned = entries.reduce((s, e) => s + (e.billable ? e.hours * e.rate : 0), 0);
-    const elapsedWorkdays = 10;
+    const billableHours = overviewEntries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0);
+    const totalHours = overviewEntries.reduce((s, e) => s + e.hours, 0);
+    const earned = overviewEntries.reduce((s, e) => s + (e.billable ? e.hours * e.rate : 0), 0);
+    const selectedDate = new Date(`${overviewMonth}-02T12:00:00`);
+    const now = new Date();
+    const isCurrentMonth = selectedDate.getFullYear() === now.getFullYear() && selectedDate.getMonth() === now.getMonth();
     const totalWorkdays = 21;
+    const elapsedWorkdays = isCurrentMonth ? Math.max(1, Math.min(totalWorkdays, Math.round(now.getDate() / new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() * totalWorkdays))) : totalWorkdays;
     const forecast = Math.round((earned / elapsedWorkdays) * totalWorkdays);
     const monthlyRecurringRevenue = clients.filter(client => client.active).reduce((sum, client) => sum + Number(client.monthlyRecurringRevenue || 0), 0);
     const currentMonthRevenue = earned + monthlyRecurringRevenue;
     return { billableHours, totalHours, earned, forecast, monthlyRecurringRevenue, currentMonthRevenue, totalForecast: forecast + monthlyRecurringRevenue, estimatedFederalTax: currentMonthRevenue * federalTaxRate / 100, utilization: totalHours ? Math.round((billableHours / totalHours) * 100) : 0, remaining: totalWorkdays - elapsedWorkdays };
-  }, [entries, clients, federalTaxRate]);
+  }, [overviewEntries, overviewMonth, clients, federalTaxRate]);
 
-  const byClient = useMemo(() => Object.values(entries.filter(e => e.billable).reduce<Record<string, { name: string; hours: number; revenue: number; rate: number }>>((acc, e) => {
+  const byClient = useMemo(() => Object.values(overviewEntries.filter(e => e.billable).reduce<Record<string, { name: string; hours: number; revenue: number; rate: number }>>((acc, e) => {
     acc[e.client] ||= { name: e.client, hours: 0, revenue: 0, rate: e.rate };
     acc[e.client].hours += e.hours; acc[e.client].revenue += e.hours * e.rate; return acc;
-  }, {})).sort((a, b) => b.revenue - a.revenue), [entries]);
+  }, {})).sort((a, b) => b.revenue - a.revenue), [overviewEntries]);
 
   const visibleEntries = useMemo(() => {
     if (user.role !== "manager") return entries;
@@ -280,7 +289,7 @@ export default function Home() {
     </aside>
 
     <section className="workspace">
-      <header><div><p className="eyebrow">AUGUST 2026</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : view === "projects" ? (user.role === "manager" ? "Projects & capacity" : "My tasks") : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : view === "projects" ? (user.role === "manager" ? "Forecast delivery and team utilization." : "Focus on the work assigned to you.") : "Know what every hour is worth."}</p></div><button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></header>
+      <header><div><p className="eyebrow">{view === "overview" ? overviewMonthLabel.toUpperCase() : "AUGUST 2026"}</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : view === "projects" ? (user.role === "manager" ? "Projects & capacity" : "My tasks") : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : view === "projects" ? (user.role === "manager" ? "Forecast delivery and team utilization." : "Focus on the work assigned to you.") : "Know what every hour is worth."}</p></div><div className="header-actions">{view === "overview" && <label className="overview-month">View month<input type="month" aria-label="Overview month" value={overviewMonth} onChange={e => e.target.value && setOverviewMonth(e.target.value)}/></label>}<button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></div></header>
 
       {view === "overview" && <>
         <div className="metrics four">
@@ -292,16 +301,16 @@ export default function Home() {
 
         <div className="grid">
           <article className="panel forecast-panel"><div className="panel-title"><div><h2>Revenue pace</h2><p>Earned vs. projected this month</p></div><span className="legend"><i /> Earned <i /> Forecast</span></div>
-            <div className="chart"><div className="y-axis"><span>$16k</span><span>$12k</span><span>$8k</span><span>$4k</span><span>$0</span></div><div className="plot"><div className="gridlines"/><svg viewBox="0 0 700 240" preserveAspectRatio="none" aria-label="Revenue forecast chart"><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1c6b55" stopOpacity=".18"/><stop offset="1" stopColor="#1c6b55" stopOpacity="0"/></linearGradient></defs><path className="area" d="M0,225 L72,213 L145,194 L218,180 L290,157 L363,142 L435,119 L435,240 L0,240Z"/><path className="earned-line" d="M0,225 L72,213 L145,194 L218,180 L290,157 L363,142 L435,119"/><path className="forecast-line" d="M435,119 L510,90 L585,60 L700,20"/><circle cx="435" cy="119" r="5"/></svg><div className="x-axis"><span>Aug 1</span><span>Aug 8</span><span>Today</span><span>Aug 22</span><span>Aug 31</span></div></div></div>
+            <div className="chart"><div className="y-axis"><span>$16k</span><span>$12k</span><span>$8k</span><span>$4k</span><span>$0</span></div><div className="plot"><div className="gridlines"/><svg viewBox="0 0 700 240" preserveAspectRatio="none" aria-label={`Revenue forecast chart for ${overviewMonthLabel}`}><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1c6b55" stopOpacity=".18"/><stop offset="1" stopColor="#1c6b55" stopOpacity="0"/></linearGradient></defs><path className="area" d="M0,225 L72,213 L145,194 L218,180 L290,157 L363,142 L435,119 L435,240 L0,240Z"/><path className="earned-line" d="M0,225 L72,213 L145,194 L218,180 L290,157 L363,142 L435,119"/><path className="forecast-line" d="M435,119 L510,90 L585,60 L700,20"/><circle cx="435" cy="119" r="5"/></svg><div className="x-axis"><span>{overviewMonthShort} 1</span><span>{overviewMonthShort} 8</span><span>{overviewMonthShort} 15</span><span>{overviewMonthShort} 22</span><span>{overviewMonthShort} {overviewMonthDays}</span></div></div></div>
             <div className="insight"><span>✦</span><p><strong>You’re pacing 6% ahead of last month.</strong><br/>At your current rate, you’ll finish near {money.format(metrics.forecast)}.</p></div>
           </article>
 
           <article className="panel recent"><div className="panel-title"><div><h2>Recent time</h2><p>Your latest entries</p></div><button onClick={() => setView("timesheet")}>View all →</button></div>
-            <div className="entries">{entries.slice(0, 5).map(e => <div className="entry" key={e.id}><div className="client-dot" data-client={e.client[0]}>{e.client[0]}</div><div className="entry-main"><strong>{e.client}</strong><span>{e.description}</span></div><div className="entry-value"><strong>{e.hours}h</strong><span>{e.billable ? money.format(e.hours * e.rate) : "Non-billable"}</span></div></div>)}</div>
+            <div className="entries">{overviewEntries.length ? overviewEntries.slice(0, 5).map(e => <div className="entry" key={e.id}><div className="client-dot" data-client={e.client[0]}>{e.client[0]}</div><div className="entry-main"><strong>{e.client}</strong><span>{e.description}</span></div><div className="entry-value"><strong>{e.hours}h</strong><span>{e.billable ? money.format(e.hours * e.rate) : "Non-billable"}</span></div></div>) : <p className="overview-empty">No time entries for {overviewMonthLabel}.</p>}</div>
           </article>
         </div>
 
-        <article className="panel client-snapshot"><div className="panel-title"><div><h2>Client snapshot</h2><p>Revenue contribution this month</p></div><button onClick={() => setView("clients")}>Manage clients →</button></div><div className="client-bars">{byClient.map((c, i) => <div className="client-bar" key={c.name}><span className={`client-badge c${i}`}>{c.name[0]}</span><strong>{c.name}</strong><div className="bar"><i style={{ width: `${c.revenue / byClient[0].revenue * 100}%` }}/></div><span>{c.hours}h</span><b>{money.format(c.revenue)}</b></div>)}</div></article>
+        <article className="panel client-snapshot"><div className="panel-title"><div><h2>Client snapshot</h2><p>Revenue contribution for {overviewMonthLabel}</p></div><button onClick={() => setView("clients")}>Manage clients →</button></div><div className="client-bars">{byClient.length ? byClient.map((c, i) => <div className="client-bar" key={c.name}><span className={`client-badge c${i}`}>{c.name[0]}</span><strong>{c.name}</strong><div className="bar"><i style={{ width: `${c.revenue / byClient[0].revenue * 100}%` }}/></div><span>{c.hours}h</span><b>{money.format(c.revenue)}</b></div>) : <p className="overview-empty">No billable client activity for {overviewMonthLabel}.</p>}</div></article>
       </>}
 
       {view === "timesheet" && <>
