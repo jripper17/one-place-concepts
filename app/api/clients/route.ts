@@ -18,8 +18,9 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   if ((await viewer(request))?.role !== "manager") return Response.json({ error: "Manager access required" }, { status: 403 });
-  const { id, hourlyRate } = await request.json() as { id: number; hourlyRate: number };
-  if (!id || Number(hourlyRate) < 0) return Response.json({ error: "Invalid rate" }, { status: 400 });
-  const [client] = await getDb().update(clients).set({ hourlyRate: Number(hourlyRate) }).where(eq(clients.id, id)).returning();
+  const { id, hourlyRate, monthlyRecurringRevenue } = await request.json() as { id: number; hourlyRate?: number; monthlyRecurringRevenue?: number };
+  const update = hourlyRate !== undefined ? { hourlyRate: Number(hourlyRate) } : { monthlyRecurringRevenue: Number(monthlyRecurringRevenue) };
+  if (!id || Object.values(update).some(value => !Number.isFinite(value) || value < 0)) return Response.json({ error: "Invalid amount" }, { status: 400 });
+  const [client] = await getDb().update(clients).set(update).where(eq(clients.id, id)).returning();
   return Response.json({ client });
 }

@@ -14,6 +14,7 @@ export const clients = sqliteTable("clients", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   hourlyRate: real("hourly_rate").notNull().default(0),
+  monthlyRecurringRevenue: real("monthly_recurring_revenue").notNull().default(0),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   syncedAt: text("synced_at"),
 }, table => [uniqueIndex("idx_clients_ninjaone_id").on(table.ninjaOneId)]);
@@ -28,4 +29,9 @@ export const timeEntries = sqliteTable("time_entries", {
   hours: real("hours").notNull(),
   rate: real("rate").notNull(),
   billable: integer("billable", { mode: "boolean" }).notNull().default(true),
+});
+
+export const businessSettings = sqliteTable("business_settings", {
+  id: integer("id").primaryKey().default(1),
+  federalTaxRate: real("federal_tax_rate").notNull().default(25),
 });
