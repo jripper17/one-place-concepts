@@ -1,10 +1,18 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { timeEntries } from "../../../db/schema";
+import { teamMembers, timeEntries } from "../../../db/schema";
 
-export async function GET() {
+async function viewer(request: Request) {
+  const userId = request.headers.get("oai-authenticated-user-id") ?? "local-owner";
+  const [member] = await getDb().select().from(teamMembers).where(eq(teamMembers.userId, userId)).limit(1);
+  return { userId, role: member?.role ?? "member" };
+}
+
+export async function GET(request: Request) {
   try {
-    const entries = await getDb().select().from(timeEntries).orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(200);
+    const user = await viewer(request);
+    const query = getDb().select().from(timeEntries);
+    const entries = user.role === "manager" ? await query.orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(200) : await query.where(eq(timeEntries.userId, user.userId)).orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(200);
     return Response.json({ entries });
   } catch { return Response.json({ entries: [] }); }
 }
@@ -12,8 +20,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json() as typeof timeEntries.$inferInsert;
+    const user = await viewer(request);
     if (!body.date || !body.client || !body.project || !body.description || Number(body.hours) <= 0) return Response.json({ error: "Missing required fields" }, { status: 400 });
-    const [entry] = await getDb().insert(timeEntries).values({ date: body.date, client: body.client, project: body.project, description: body.description, hours: Number(body.hours), rate: Number(body.rate), billable: Boolean(body.billable) }).returning();
+    const [entry] = await getDb().insert(timeEntries).values({ userId: user.userId, date: body.date, client: body.client, project: body.project, description: body.description, hours: Number(body.hours), rate: Number(body.rate), billable: Boolean(body.billable) }).returning();
     return Response.json({ entry }, { status: 201 });
   } catch { return Response.json({ error: "Could not save this entry" }, { status: 500 }); }
 }

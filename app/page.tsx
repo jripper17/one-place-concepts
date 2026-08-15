@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Entry = { id: number; date: string; client: string; project: string; description: string; hours: number; rate: number; billable: boolean };
+type User = { id: number; name: string; email: string; role: "manager" | "member" };
+type Member = User & { userId: string };
 
 const seed: Entry[] = [
   { id: 1, date: "2026-08-14", client: "Northstar Labs", project: "Product strategy", description: "Roadmap workshop", hours: 3.5, rate: 185, billable: true },
@@ -23,13 +25,21 @@ export default function Home() {
   const [view, setView] = useState<"overview" | "timesheet" | "clients">("overview");
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [user, setUser] = useState<User>({ id: 0, name: "", email: "", role: "member" });
+  const [members, setMembers] = useState<Member[]>([]);
   const [form, setForm] = useState({ date: "2026-08-15", client: "Northstar Labs", project: "Product strategy", description: "", hours: "", rate: "185", billable: true });
 
   useEffect(() => {
+    fetch("/api/session").then(r => r.json()).then(data => { setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); if (data.user.role === "manager") fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); });
     fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
       if (data?.entries?.length) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);
   }, []);
+
+  async function changeRole(id: number, role: "manager" | "member") {
+    const response = await fetch("/api/team", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, role }) });
+    if (response.ok) setMembers(list => list.map(m => m.id === id ? { ...m, role } : m));
+  }
 
   const metrics = useMemo(() => {
     const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0);
@@ -62,12 +72,12 @@ export default function Home() {
     <aside className="sidebar">
       <div className="brand"><span className="brandmark">T</span><span>Tempo</span></div>
       <nav aria-label="Main navigation">
-        <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><Icon>⌁</Icon>Overview</button>
+        {user.role === "manager" && <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><Icon>⌁</Icon>Overview</button>}
         <button className={view === "timesheet" ? "active" : ""} onClick={() => setView("timesheet")}><Icon>▦</Icon>Timesheet</button>
-        <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Icon>◎</Icon>Clients & rates</button>
+        {user.role === "manager" && <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Icon>◎</Icon>Clients & rates</button>}
       </nav>
       <div className="sidebar-note"><span className="pulse" /><div><strong>Forecast is live</strong><small>Updated from every entry</small></div></div>
-      <div className="profile"><span className="avatar">JM</span><div><strong>Jason Miller</strong><small>Independent consultant</small></div><button aria-label="Profile options">•••</button></div>
+      <div className="profile"><span className="avatar">{(user.name || "U").slice(0,2).toUpperCase()}</span><div><strong>{user.name || "Signed-in user"}</strong><small>{user.role === "manager" ? "Manager" : "Team member"}</small></div><button aria-label="Profile options">•••</button></div>
     </aside>
 
     <section className="workspace">
@@ -96,7 +106,7 @@ export default function Home() {
 
       {view === "timesheet" && <article className="panel table-panel"><div className="panel-title"><div><h2>August entries</h2><p>{metrics.totalHours.toFixed(1)} total hours · {metrics.billableHours.toFixed(1)} billable</p></div><button onClick={() => setOpen(true)}>＋ Add entry</button></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Client / project</th><th>Description</th><th>Hours</th><th>Value</th></tr></thead><tbody>{entries.map(e => <tr key={e.id}><td>{new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td><td><strong>{e.client}</strong><small>{e.project}</small></td><td>{e.description}</td><td>{e.hours.toFixed(1)}</td><td>{e.billable ? money.format(e.hours * e.rate) : <span className="muted">Internal</span>}</td></tr>)}</tbody></table></div></article>}
 
-      {view === "clients" && <div className="client-cards">{byClient.map((c, i) => <article className="panel client-card" key={c.name}><div className={`big-badge c${i}`}>{c.name[0]}</div><div><h2>{c.name}</h2><p>{c.name === "Northstar Labs" ? "Product strategy" : c.name === "Acme Co." ? "Website refresh" : "Brand launch"}</p></div><div className="rate"><span>Hourly rate</span><strong>{money.format(c.rate)}</strong></div><div className="rate"><span>August revenue</span><strong>{money.format(c.revenue)}</strong></div><div className="rate"><span>Hours logged</span><strong>{c.hours}h</strong></div></article>)}</div>}
+      {view === "clients" && user.role === "manager" && <><div className="client-cards">{byClient.map((c, i) => <article className="panel client-card" key={c.name}><div className={`big-badge c${i}`}>{c.name[0]}</div><div><h2>{c.name}</h2><p>{c.name === "Northstar Labs" ? "Product strategy" : c.name === "Acme Co." ? "Website refresh" : "Brand launch"}</p></div><div className="rate"><span>Hourly rate</span><strong>{money.format(c.rate)}</strong></div><div className="rate"><span>August revenue</span><strong>{money.format(c.revenue)}</strong></div><div className="rate"><span>Hours logged</span><strong>{c.hours}h</strong></div></article>)}</div><article className="panel team-access"><div className="panel-title"><div><h2>Team access</h2><p>Choose who can see business-wide revenue, forecasts, clients, and rates.</p></div></div><div className="members">{members.map(m => <div className="member" key={m.id}><span className="avatar">{m.name.slice(0,2).toUpperCase()}</span><div><strong>{m.name}</strong><small>{m.email}</small></div><select aria-label={`Role for ${m.name}`} value={m.role} disabled={m.id === user.id} onChange={e => changeRole(m.id, e.target.value as "manager" | "member")}><option value="member">Team member — timesheet only</option><option value="manager">Manager — full access</option></select></div>)}</div></article></>}
     </section>
 
     {open && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setOpen(false)}><form className="modal" onSubmit={addEntry}><div className="modal-head"><div><p className="eyebrow">NEW ENTRY</p><h2>Log your time</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close">×</button></div><label>Date<input type="date" required value={form.date} onChange={e => setForm({...form, date: e.target.value})}/></label><div className="form-row"><label>Client<select value={form.client} onChange={e => { const rates: Record<string,string> = {"Northstar Labs":"185","Acme Co.":"165","Kite & Key":"150","Internal":"0"}; setForm({...form, client:e.target.value, rate:rates[e.target.value]})}}><option>Northstar Labs</option><option>Acme Co.</option><option>Kite & Key</option><option>Internal</option></select></label><label>Project<input required value={form.project} onChange={e => setForm({...form, project:e.target.value})}/></label></div><label>What did you work on?<input autoFocus required placeholder="e.g. Client workshop and notes" value={form.description} onChange={e => setForm({...form, description:e.target.value})}/></label><div className="form-row"><label>Hours<input type="number" step="0.25" min="0.25" required placeholder="0.0" value={form.hours} onChange={e => setForm({...form, hours:e.target.value})}/></label><label>Hourly rate<input type="number" min="0" required value={form.rate} onChange={e => setForm({...form, rate:e.target.value})}/></label></div><label className="check"><input type="checkbox" checked={form.billable} onChange={e => setForm({...form, billable:e.target.checked})}/><span>Billable time</span><small>Counts toward revenue and forecast</small></label><button className="primary submit" type="submit">Save time entry</button></form></div>}
