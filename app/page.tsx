@@ -1,0 +1,105 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
+
+type Entry = { id: number; date: string; client: string; project: string; description: string; hours: number; rate: number; billable: boolean };
+
+const seed: Entry[] = [
+  { id: 1, date: "2026-08-14", client: "Northstar Labs", project: "Product strategy", description: "Roadmap workshop", hours: 3.5, rate: 185, billable: true },
+  { id: 2, date: "2026-08-14", client: "Acme Co.", project: "Website refresh", description: "Design review & revisions", hours: 4, rate: 165, billable: true },
+  { id: 3, date: "2026-08-13", client: "Internal", project: "Operations", description: "Monthly planning", hours: 1.5, rate: 0, billable: false },
+  { id: 4, date: "2026-08-12", client: "Northstar Labs", project: "Product strategy", description: "Research synthesis", hours: 6, rate: 185, billable: true },
+  { id: 5, date: "2026-08-11", client: "Kite & Key", project: "Brand launch", description: "Campaign concepts", hours: 5, rate: 150, billable: true },
+  { id: 6, date: "2026-08-08", client: "Acme Co.", project: "Website refresh", description: "Homepage architecture", hours: 7, rate: 165, billable: true },
+  { id: 7, date: "2026-08-07", client: "Northstar Labs", project: "Product strategy", description: "Stakeholder interviews", hours: 5.5, rate: 185, billable: true },
+];
+
+const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+function Icon({ children }: { children: React.ReactNode }) { return <span className="icon" aria-hidden="true">{children}</span>; }
+
+export default function Home() {
+  const [entries, setEntries] = useState<Entry[]>(seed);
+  const [view, setView] = useState<"overview" | "timesheet" | "clients">("overview");
+  const [open, setOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [form, setForm] = useState({ date: "2026-08-15", client: "Northstar Labs", project: "Product strategy", description: "", hours: "", rate: "185", billable: true });
+
+  useEffect(() => {
+    fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.entries?.length) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
+    }).catch(() => undefined);
+  }, []);
+
+  const metrics = useMemo(() => {
+    const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0);
+    const totalHours = entries.reduce((s, e) => s + e.hours, 0);
+    const earned = entries.reduce((s, e) => s + (e.billable ? e.hours * e.rate : 0), 0);
+    const elapsedWorkdays = 10;
+    const totalWorkdays = 21;
+    const forecast = Math.round((earned / elapsedWorkdays) * totalWorkdays);
+    return { billableHours, totalHours, earned, forecast, utilization: Math.round((billableHours / totalHours) * 100), remaining: totalWorkdays - elapsedWorkdays };
+  }, [entries]);
+
+  const byClient = useMemo(() => Object.values(entries.filter(e => e.billable).reduce<Record<string, { name: string; hours: number; revenue: number; rate: number }>>((acc, e) => {
+    acc[e.client] ||= { name: e.client, hours: 0, revenue: 0, rate: e.rate };
+    acc[e.client].hours += e.hours; acc[e.client].revenue += e.hours * e.rate; return acc;
+  }, {})).sort((a, b) => b.revenue - a.revenue), [entries]);
+
+  async function addEntry(event: FormEvent) {
+    event.preventDefault();
+    const entry: Entry = { id: Date.now(), ...form, hours: Number(form.hours), rate: Number(form.rate) };
+    setEntries(prev => [entry, ...prev]); setOpen(false); setSaved(true);
+    setForm(f => ({ ...f, description: "", hours: "" }));
+    setTimeout(() => setSaved(false), 2500);
+    try {
+      const response = await fetch("/api/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(entry) });
+      if (response.ok) { const data = await response.json(); setEntries(prev => prev.map(e => e.id === entry.id ? data.entry : e)); }
+    } catch { /* optimistic demo remains usable */ }
+  }
+
+  return <main>
+    <aside className="sidebar">
+      <div className="brand"><span className="brandmark">T</span><span>Tempo</span></div>
+      <nav aria-label="Main navigation">
+        <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><Icon>⌁</Icon>Overview</button>
+        <button className={view === "timesheet" ? "active" : ""} onClick={() => setView("timesheet")}><Icon>▦</Icon>Timesheet</button>
+        <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Icon>◎</Icon>Clients & rates</button>
+      </nav>
+      <div className="sidebar-note"><span className="pulse" /><div><strong>Forecast is live</strong><small>Updated from every entry</small></div></div>
+      <div className="profile"><span className="avatar">JM</span><div><strong>Jason Miller</strong><small>Independent consultant</small></div><button aria-label="Profile options">•••</button></div>
+    </aside>
+
+    <section className="workspace">
+      <header><div><p className="eyebrow">AUGUST 2026</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : "Know what every hour is worth."}</p></div><button className="primary" onClick={() => setOpen(true)}><span>＋</span> Log time</button></header>
+
+      {view === "overview" && <>
+        <div className="metrics">
+          <article><div className="metric-top"><span>Revenue earned</span><span className="trend">↗ 8.2%</span></div><strong>{money.format(metrics.earned)}</strong><small>From {metrics.billableHours.toFixed(1)} billable hours</small></article>
+          <article className="hero-metric"><div className="metric-top"><span>Month forecast</span><span className="live">● LIVE</span></div><strong>{money.format(metrics.forecast)}</strong><div className="forecast-track"><i style={{ width: `${Math.min(100, metrics.earned / metrics.forecast * 100)}%` }} /></div><small>{money.format(metrics.earned)} earned · {metrics.remaining} workdays left</small></article>
+          <article><div className="metric-top"><span>Billable utilization</span><span className="target">Target 80%</span></div><strong>{metrics.utilization}%</strong><small>{metrics.billableHours.toFixed(1)} of {metrics.totalHours.toFixed(1)} hours</small></article>
+        </div>
+
+        <div className="grid">
+          <article className="panel forecast-panel"><div className="panel-title"><div><h2>Revenue pace</h2><p>Earned vs. projected this month</p></div><span className="legend"><i /> Earned <i /> Forecast</span></div>
+            <div className="chart"><div className="y-axis"><span>$16k</span><span>$12k</span><span>$8k</span><span>$4k</span><span>$0</span></div><div className="plot"><div className="gridlines"/><svg viewBox="0 0 700 240" preserveAspectRatio="none" aria-label="Revenue forecast chart"><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1c6b55" stopOpacity=".18"/><stop offset="1" stopColor="#1c6b55" stopOpacity="0"/></linearGradient></defs><path className="area" d="M0,225 L72,213 L145,194 L218,180 L290,157 L363,142 L435,119 L435,240 L0,240Z"/><path className="earned-line" d="M0,225 L72,213 L145,194 L218,180 L290,157 L363,142 L435,119"/><path className="forecast-line" d="M435,119 L510,90 L585,60 L700,20"/><circle cx="435" cy="119" r="5"/></svg><div className="x-axis"><span>Aug 1</span><span>Aug 8</span><span>Today</span><span>Aug 22</span><span>Aug 31</span></div></div></div>
+            <div className="insight"><span>✦</span><p><strong>You’re pacing 6% ahead of last month.</strong><br/>At your current rate, you’ll finish near {money.format(metrics.forecast)}.</p></div>
+          </article>
+
+          <article className="panel recent"><div className="panel-title"><div><h2>Recent time</h2><p>Your latest entries</p></div><button onClick={() => setView("timesheet")}>View all →</button></div>
+            <div className="entries">{entries.slice(0, 5).map(e => <div className="entry" key={e.id}><div className="client-dot" data-client={e.client[0]}>{e.client[0]}</div><div className="entry-main"><strong>{e.client}</strong><span>{e.description}</span></div><div className="entry-value"><strong>{e.hours}h</strong><span>{e.billable ? money.format(e.hours * e.rate) : "Non-billable"}</span></div></div>)}</div>
+          </article>
+        </div>
+
+        <article className="panel client-snapshot"><div className="panel-title"><div><h2>Client snapshot</h2><p>Revenue contribution this month</p></div><button onClick={() => setView("clients")}>Manage clients →</button></div><div className="client-bars">{byClient.map((c, i) => <div className="client-bar" key={c.name}><span className={`client-badge c${i}`}>{c.name[0]}</span><strong>{c.name}</strong><div className="bar"><i style={{ width: `${c.revenue / byClient[0].revenue * 100}%` }}/></div><span>{c.hours}h</span><b>{money.format(c.revenue)}</b></div>)}</div></article>
+      </>}
+
+      {view === "timesheet" && <article className="panel table-panel"><div className="panel-title"><div><h2>August entries</h2><p>{metrics.totalHours.toFixed(1)} total hours · {metrics.billableHours.toFixed(1)} billable</p></div><button onClick={() => setOpen(true)}>＋ Add entry</button></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Client / project</th><th>Description</th><th>Hours</th><th>Value</th></tr></thead><tbody>{entries.map(e => <tr key={e.id}><td>{new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td><td><strong>{e.client}</strong><small>{e.project}</small></td><td>{e.description}</td><td>{e.hours.toFixed(1)}</td><td>{e.billable ? money.format(e.hours * e.rate) : <span className="muted">Internal</span>}</td></tr>)}</tbody></table></div></article>}
+
+      {view === "clients" && <div className="client-cards">{byClient.map((c, i) => <article className="panel client-card" key={c.name}><div className={`big-badge c${i}`}>{c.name[0]}</div><div><h2>{c.name}</h2><p>{c.name === "Northstar Labs" ? "Product strategy" : c.name === "Acme Co." ? "Website refresh" : "Brand launch"}</p></div><div className="rate"><span>Hourly rate</span><strong>{money.format(c.rate)}</strong></div><div className="rate"><span>August revenue</span><strong>{money.format(c.revenue)}</strong></div><div className="rate"><span>Hours logged</span><strong>{c.hours}h</strong></div></article>)}</div>}
+    </section>
+
+    {open && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setOpen(false)}><form className="modal" onSubmit={addEntry}><div className="modal-head"><div><p className="eyebrow">NEW ENTRY</p><h2>Log your time</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close">×</button></div><label>Date<input type="date" required value={form.date} onChange={e => setForm({...form, date: e.target.value})}/></label><div className="form-row"><label>Client<select value={form.client} onChange={e => { const rates: Record<string,string> = {"Northstar Labs":"185","Acme Co.":"165","Kite & Key":"150","Internal":"0"}; setForm({...form, client:e.target.value, rate:rates[e.target.value]})}}><option>Northstar Labs</option><option>Acme Co.</option><option>Kite & Key</option><option>Internal</option></select></label><label>Project<input required value={form.project} onChange={e => setForm({...form, project:e.target.value})}/></label></div><label>What did you work on?<input autoFocus required placeholder="e.g. Client workshop and notes" value={form.description} onChange={e => setForm({...form, description:e.target.value})}/></label><div className="form-row"><label>Hours<input type="number" step="0.25" min="0.25" required placeholder="0.0" value={form.hours} onChange={e => setForm({...form, hours:e.target.value})}/></label><label>Hourly rate<input type="number" min="0" required value={form.rate} onChange={e => setForm({...form, rate:e.target.value})}/></label></div><label className="check"><input type="checkbox" checked={form.billable} onChange={e => setForm({...form, billable:e.target.checked})}/><span>Billable time</span><small>Counts toward revenue and forecast</small></label><button className="primary submit" type="submit">Save time entry</button></form></div>}
+    {saved && <div className="toast">✓ Time entry saved</div>}
+  </main>;
+}
