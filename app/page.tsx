@@ -102,8 +102,9 @@ export default function Home() {
   }
 
   function openEditEntry(entry: Entry) {
+    const clientRate = clients.find(client => client.name === entry.client)?.hourlyRate;
     setEditingEntry(entry);
-    setForm({ date: entry.date, client: entry.client, project: entry.project, description: entry.description, hours: String(entry.hours), rate: String(entry.rate), billable: entry.billable });
+    setForm({ date: entry.date, client: entry.client, project: entry.project, description: entry.description, hours: String(entry.hours), rate: String(clientRate ?? entry.rate), billable: entry.billable });
     setOpen(true);
   }
 
