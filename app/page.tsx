@@ -7,37 +7,28 @@ type User = { id: number; name: string; email: string; role: "manager" | "member
 type Member = User & { userId: string };
 type Client = { id: number; ninjaOneId: number | null; name: string; description: string; hourlyRate: number; active: boolean; syncedAt: string | null };
 
-const seed: Entry[] = [
-  { id: 1, date: "2026-08-14", client: "Northstar Labs", project: "Product strategy", description: "Roadmap workshop", hours: 3.5, rate: 185, billable: true },
-  { id: 2, date: "2026-08-14", client: "Acme Co.", project: "Website refresh", description: "Design review & revisions", hours: 4, rate: 165, billable: true },
-  { id: 3, date: "2026-08-13", client: "Internal", project: "Operations", description: "Monthly planning", hours: 1.5, rate: 0, billable: false },
-  { id: 4, date: "2026-08-12", client: "Northstar Labs", project: "Product strategy", description: "Research synthesis", hours: 6, rate: 185, billable: true },
-  { id: 5, date: "2026-08-11", client: "Kite & Key", project: "Brand launch", description: "Campaign concepts", hours: 5, rate: 150, billable: true },
-  { id: 6, date: "2026-08-08", client: "Acme Co.", project: "Website refresh", description: "Homepage architecture", hours: 7, rate: 165, billable: true },
-  { id: 7, date: "2026-08-07", client: "Northstar Labs", project: "Product strategy", description: "Stakeholder interviews", hours: 5.5, rate: 185, billable: true },
-];
-
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 function Icon({ children }: { children: React.ReactNode }) { return <span className="icon" aria-hidden="true">{children}</span>; }
 
 export default function Home() {
-  const [entries, setEntries] = useState<Entry[]>(seed);
+  const [entries, setEntries] = useState<Entry[]>([]);
   const [view, setView] = useState<"overview" | "timesheet" | "clients">("overview");
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [user, setUser] = useState<User>({ id: 0, name: "", email: "", role: "member" });
   const [members, setMembers] = useState<Member[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [ninjaConfigured, setNinjaConfigured] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
-  const [form, setForm] = useState({ date: "2026-08-15", client: "Northstar Labs", project: "Product strategy", description: "", hours: "", rate: "185", billable: true });
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
 
   useEffect(() => {
     fetch("/api/session").then(r => r.json()).then(data => { if (!data.user) return; setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); } });
     fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
-      if (data?.entries?.length) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
+      if (data?.entries) setEntries(data.entries.map((e: Entry) => ({ ...e, hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);
   }, []);
 
@@ -67,7 +58,7 @@ export default function Home() {
     const elapsedWorkdays = 10;
     const totalWorkdays = 21;
     const forecast = Math.round((earned / elapsedWorkdays) * totalWorkdays);
-    return { billableHours, totalHours, earned, forecast, utilization: Math.round((billableHours / totalHours) * 100), remaining: totalWorkdays - elapsedWorkdays };
+    return { billableHours, totalHours, earned, forecast, utilization: totalHours ? Math.round((billableHours / totalHours) * 100) : 0, remaining: totalWorkdays - elapsedWorkdays };
   }, [entries]);
 
   const byClient = useMemo(() => Object.values(entries.filter(e => e.billable).reduce<Record<string, { name: string; hours: number; revenue: number; rate: number }>>((acc, e) => {
@@ -75,16 +66,33 @@ export default function Home() {
     acc[e.client].hours += e.hours; acc[e.client].revenue += e.hours * e.rate; return acc;
   }, {})).sort((a, b) => b.revenue - a.revenue), [entries]);
 
-  async function addEntry(event: FormEvent) {
+  function openNewEntry() {
+    const firstClient = clients[0];
+    setEditingEntry(null);
+    setForm({ date: new Date().toISOString().slice(0, 10), client: firstClient?.name ?? "Internal", project: "", description: "", hours: "", rate: String(firstClient?.hourlyRate ?? 0), billable: Boolean(firstClient) });
+    setOpen(true);
+  }
+
+  function openEditEntry(entry: Entry) {
+    setEditingEntry(entry);
+    setForm({ date: entry.date, client: entry.client, project: entry.project, description: entry.description, hours: String(entry.hours), rate: String(entry.rate), billable: entry.billable });
+    setOpen(true);
+  }
+
+  async function saveEntry(event: FormEvent) {
     event.preventDefault();
-    const entry: Entry = { id: Date.now(), ...form, hours: Number(form.hours), rate: Number(form.rate) };
-    setEntries(prev => [entry, ...prev]); setOpen(false); setSaved(true);
-    setForm(f => ({ ...f, description: "", hours: "" }));
-    setTimeout(() => setSaved(false), 2500);
-    try {
-      const response = await fetch("/api/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(entry) });
-      if (response.ok) { const data = await response.json(); setEntries(prev => prev.map(e => e.id === entry.id ? data.entry : e)); }
-    } catch { /* optimistic demo remains usable */ }
+    const payload: Entry = { id: editingEntry?.id ?? 0, ...form, hours: Number(form.hours), rate: Number(form.rate) };
+    const response = await fetch("/api/entries", { method: editingEntry ? "PATCH" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    if (!response.ok) return;
+    const data = await response.json();
+    setEntries(prev => editingEntry ? prev.map(e => e.id === data.entry.id ? data.entry : e) : [data.entry, ...prev]);
+    setOpen(false); setEditingEntry(null); setSaved(true); setTimeout(() => setSaved(false), 2500);
+  }
+
+  async function deleteEntry(entry: Entry) {
+    if (!window.confirm(`Delete ${entry.hours} hours for ${entry.client}?`)) return;
+    const response = await fetch(`/api/entries?id=${entry.id}`, { method: "DELETE" });
+    if (response.ok) setEntries(prev => prev.filter(e => e.id !== entry.id));
   }
 
   return <main>
@@ -100,12 +108,12 @@ export default function Home() {
     </aside>
 
     <section className="workspace">
-      <header><div><p className="eyebrow">AUGUST 2026</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : "Know what every hour is worth."}</p></div><button className="primary" onClick={() => setOpen(true)}><span>＋</span> Log time</button></header>
+      <header><div><p className="eyebrow">AUGUST 2026</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : "Know what every hour is worth."}</p></div><button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></header>
 
       {view === "overview" && <>
         <div className="metrics">
           <article><div className="metric-top"><span>Revenue earned</span><span className="trend">↗ 8.2%</span></div><strong>{money.format(metrics.earned)}</strong><small>From {metrics.billableHours.toFixed(1)} billable hours</small></article>
-          <article className="hero-metric"><div className="metric-top"><span>Month forecast</span><span className="live">● LIVE</span></div><strong>{money.format(metrics.forecast)}</strong><div className="forecast-track"><i style={{ width: `${Math.min(100, metrics.earned / metrics.forecast * 100)}%` }} /></div><small>{money.format(metrics.earned)} earned · {metrics.remaining} workdays left</small></article>
+          <article className="hero-metric"><div className="metric-top"><span>Month forecast</span><span className="live">● LIVE</span></div><strong>{money.format(metrics.forecast)}</strong><div className="forecast-track"><i style={{ width: `${metrics.forecast ? Math.min(100, metrics.earned / metrics.forecast * 100) : 0}%` }} /></div><small>{money.format(metrics.earned)} earned · {metrics.remaining} workdays left</small></article>
           <article><div className="metric-top"><span>Billable utilization</span><span className="target">Target 80%</span></div><strong>{metrics.utilization}%</strong><small>{metrics.billableHours.toFixed(1)} of {metrics.totalHours.toFixed(1)} hours</small></article>
         </div>
 
@@ -123,12 +131,12 @@ export default function Home() {
         <article className="panel client-snapshot"><div className="panel-title"><div><h2>Client snapshot</h2><p>Revenue contribution this month</p></div><button onClick={() => setView("clients")}>Manage clients →</button></div><div className="client-bars">{byClient.map((c, i) => <div className="client-bar" key={c.name}><span className={`client-badge c${i}`}>{c.name[0]}</span><strong>{c.name}</strong><div className="bar"><i style={{ width: `${c.revenue / byClient[0].revenue * 100}%` }}/></div><span>{c.hours}h</span><b>{money.format(c.revenue)}</b></div>)}</div></article>
       </>}
 
-      {view === "timesheet" && <article className="panel table-panel"><div className="panel-title"><div><h2>August entries</h2><p>{metrics.totalHours.toFixed(1)} total hours · {metrics.billableHours.toFixed(1)} billable</p></div><button onClick={() => setOpen(true)}>＋ Add entry</button></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Client / project</th><th>Description</th><th>Hours</th><th>Value</th></tr></thead><tbody>{entries.map(e => <tr key={e.id}><td>{new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td><td><strong>{e.client}</strong><small>{e.project}</small></td><td>{e.description}</td><td>{e.hours.toFixed(1)}</td><td>{e.billable ? money.format(e.hours * e.rate) : <span className="muted">Internal</span>}</td></tr>)}</tbody></table></div></article>}
+      {view === "timesheet" && <article className="panel table-panel"><div className="panel-title"><div><h2>August entries</h2><p>{metrics.totalHours.toFixed(1)} total hours · {metrics.billableHours.toFixed(1)} billable</p></div><button onClick={openNewEntry}>＋ Add entry</button></div><div className="table-wrap"><table><thead><tr><th>Date</th><th>Client / project</th><th>Description</th><th>Hours</th><th>Value</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{entries.length ? entries.map(e => <tr key={e.id}><td>{new Date(`${e.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td><td><strong>{e.client}</strong><small>{e.project}</small></td><td>{e.description}</td><td>{e.hours.toFixed(1)}</td><td>{e.billable ? money.format(e.hours * e.rate) : <span className="muted">Internal</span>}</td><td><div className="row-actions"><button onClick={() => openEditEntry(e)}>Edit</button><button className="danger" onClick={() => deleteEntry(e)}>Delete</button></div></td></tr>) : <tr><td colSpan={6} className="empty-state"><strong>No time entries yet</strong><span>Log your first entry to start tracking hours and revenue.</span></td></tr>}</tbody></table></div></article>}
 
       {view === "clients" && user.role === "manager" && <><article className="panel ninja-panel"><div><span className="ninja-mark">N</span><div><h2>NinjaOne client sync</h2><p>{ninjaConfigured ? "Connected securely · Organizations become Tempo clients" : "Ready to connect · API credentials are still required"}</p></div></div><button className="primary" disabled={!ninjaConfigured || syncing} onClick={syncNinjaOne}>{syncing ? "Syncing…" : "↻ Sync clients"}</button>{syncMessage && <small className="sync-message">{syncMessage}</small>}</article><div className="client-cards">{(clients.length ? clients : byClient.map((c, i) => ({ id: -i-1, ninjaOneId: null, name: c.name, description: "", hourlyRate: c.rate, active: true, syncedAt: null }))).map((c, i) => { const activity = byClient.find(b => b.name === c.name); return <article className="panel client-card" key={c.id}><div className={`big-badge c${i%3}`}>{c.name[0]}</div><div><h2>{c.name}</h2><p>{c.ninjaOneId ? `NinjaOne organization #${c.ninjaOneId}` : c.description || "Tempo client"}</p></div><div className="rate"><span>Hourly rate</span><label className="inline-rate">$ <input type="number" min="0" value={c.hourlyRate} disabled={c.id < 0} onChange={e => changeRate(c.id, Number(e.target.value))}/></label></div><div className="rate"><span>August revenue</span><strong>{money.format(activity?.revenue ?? 0)}</strong></div><div className="rate"><span>Hours logged</span><strong>{activity?.hours ?? 0}h</strong></div></article>})}</div><article className="panel team-access"><div className="panel-title"><div><h2>Team access</h2><p>Choose who can see business-wide revenue, forecasts, clients, and rates.</p></div></div><div className="members">{members.map(m => <div className="member" key={m.id}><span className="avatar">{m.name.slice(0,2).toUpperCase()}</span><div><strong>{m.name}</strong><small>{m.email}</small></div><select aria-label={`Role for ${m.name}`} value={m.role} disabled={m.id === user.id} onChange={e => changeRole(m.id, e.target.value as "manager" | "member")}><option value="member">Team member — timesheet only</option><option value="manager">Manager — full access</option></select></div>)}</div></article></>}
     </section>
 
-    {open && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setOpen(false)}><form className="modal" onSubmit={addEntry}><div className="modal-head"><div><p className="eyebrow">NEW ENTRY</p><h2>Log your time</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close">×</button></div><label>Date<input type="date" required value={form.date} onChange={e => setForm({...form, date: e.target.value})}/></label><div className="form-row"><label>Client<select value={form.client} onChange={e => { const selected = clients.find(c => c.name === e.target.value); setForm({...form, client:e.target.value, rate:String(selected?.hourlyRate ?? 0)})}}>{clients.length ? clients.map(c => <option key={c.id}>{c.name}</option>) : <><option>Northstar Labs</option><option>Acme Co.</option><option>Kite & Key</option></>}<option>Internal</option></select></label><label>Project<input required value={form.project} onChange={e => setForm({...form, project:e.target.value})}/></label></div><label>What did you work on?<input autoFocus required placeholder="e.g. Client workshop and notes" value={form.description} onChange={e => setForm({...form, description:e.target.value})}/></label><div className="form-row"><label>Hours<input type="number" step="0.25" min="0.25" required placeholder="0.0" value={form.hours} onChange={e => setForm({...form, hours:e.target.value})}/></label><label>Hourly rate<input type="number" min="0" required value={form.rate} onChange={e => setForm({...form, rate:e.target.value})}/></label></div><label className="check"><input type="checkbox" checked={form.billable} onChange={e => setForm({...form, billable:e.target.checked})}/><span>Billable time</span><small>Counts toward revenue and forecast</small></label><button className="primary submit" type="submit">Save time entry</button></form></div>}
+    {open && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setOpen(false)}><form className="modal" onSubmit={saveEntry}><div className="modal-head"><div><p className="eyebrow">{editingEntry ? "EDIT ENTRY" : "NEW ENTRY"}</p><h2>{editingEntry ? "Update your time" : "Log your time"}</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close">×</button></div><label>Date<input type="date" required value={form.date} onChange={e => setForm({...form, date: e.target.value})}/></label><div className="form-row"><label>Client<select value={form.client} onChange={e => { const selected = clients.find(c => c.name === e.target.value); setForm({...form, client:e.target.value, rate:String(selected?.hourlyRate ?? 0)})}}>{clients.map(c => <option key={c.id}>{c.name}</option>)}<option>Internal</option></select></label><label>Project<input required value={form.project} onChange={e => setForm({...form, project:e.target.value})}/></label></div><label>What did you work on?<input autoFocus required placeholder="e.g. Client workshop and notes" value={form.description} onChange={e => setForm({...form, description:e.target.value})}/></label><div className="form-row"><label>Hours<input type="number" step="0.25" min="0.25" required placeholder="0.0" value={form.hours} onChange={e => setForm({...form, hours:e.target.value})}/></label><label>Hourly rate<input type="number" min="0" required value={form.rate} onChange={e => setForm({...form, rate:e.target.value})}/></label></div><label className="check"><input type="checkbox" checked={form.billable} onChange={e => setForm({...form, billable:e.target.checked})}/><span>Billable time</span><small>Counts toward revenue and forecast</small></label><button className="primary submit" type="submit">{editingEntry ? "Update time entry" : "Save time entry"}</button></form></div>}
     {saved && <div className="toast">✓ Time entry saved</div>}
   </main>;
 }
