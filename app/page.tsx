@@ -8,6 +8,7 @@ type Member = User & { userId: string; active: boolean };
 type Client = { id: number; ninjaOneId: number | null; name: string; description: string; hourlyRate: number; monthlyRecurringRevenue: number; active: boolean; syncedAt: string | null };
 type Project = { id: number; client: string; name: string; budgetHours: number; startDate: string; dueDate: string; status: "planned" | "active" | "complete" };
 type ProjectTask = { id: number; projectId: number; title: string; assigneeUserId: string; estimatedHours: number; dueDate: string; status: "todo" | "in_progress" | "complete" };
+type Quote = { id: number; client: string; description: string; quantity: number; rate: number; expiresOn: string; status: "draft" | "sent" | "accepted"; createdAt: string };
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
@@ -20,7 +21,7 @@ function Icon({ children }: { children: React.ReactNode }) { return <span classN
 
 export default function Home() {
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [view, setView] = useState<"overview" | "timesheet" | "projects" | "clients">("overview");
+  const [view, setView] = useState<"overview" | "timesheet" | "projects" | "quotes" | "clients">("overview");
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -47,11 +48,13 @@ export default function Home() {
   const [taskForm, setTaskForm] = useState({ projectId: "", title: "", assigneeUserId: "", estimatedHours: "", dueDate: "" });
   const [timesheetFilter, setTimesheetFilter] = useState({ client: "", project: "", month: "", from: "", to: "", sort: "date_desc" });
   const [overviewMonth, setOverviewMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [quoteForm, setQuoteForm] = useState({ client: "", description: "", quantity: "1", rate: "", expiresOn: new Date(Date.now() + 30 * 86400000).toISOString().slice(0,10) });
   const importInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
 
   useEffect(() => {
-    fetch("/api/session").then(async r => ({ ok: r.ok, data: await r.json() })).then(({ ok, data }) => { if (!ok || !data.user) { setAuthStatus("signedOut"); return; } setAuthStatus("signedIn"); setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); fetch("/api/projects").then(r => r.json()).then(p => { setProjects(p.projects ?? []); setProjectTasks(p.tasks ?? []); setProjectPeople(p.people ?? []); setProjectHours(p.entries ?? []); }); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); } }).catch(() => setAuthStatus("signedOut"));
+    fetch("/api/session").then(async r => ({ ok: r.ok, data: await r.json() })).then(({ ok, data }) => { if (!ok || !data.user) { setAuthStatus("signedOut"); return; } setAuthStatus("signedIn"); setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); fetch("/api/projects").then(r => r.json()).then(p => { setProjects(p.projects ?? []); setProjectTasks(p.tasks ?? []); setProjectPeople(p.people ?? []); setProjectHours(p.entries ?? []); }); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); fetch("/api/quotes").then(r => r.json()).then(q => setQuotes(q.quotes ?? [])); } }).catch(() => setAuthStatus("signedOut"));
     fetch("/api/entries").then(r => r.ok ? r.json() : null).then(data => {
       if (data?.entries) setEntries(data.entries.map((e: Entry) => ({ ...e, project: cleanEntryText(e.project), description: cleanEntryText(e.description), hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);
@@ -121,6 +124,19 @@ export default function Home() {
   async function changeTaskStatus(task: ProjectTask, status: ProjectTask["status"]) {
     const response = await fetch("/api/projects", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: task.id, status }) });
     if (response.ok) setProjectTasks(list => list.map(item => item.id === task.id ? { ...item, status } : item));
+  }
+
+  async function createQuote(event: FormEvent) {
+    event.preventDefault();
+    const response = await fetch("/api/quotes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...quoteForm, quantity: Number(quoteForm.quantity), rate: Number(quoteForm.rate) }) });
+    if (!response.ok) return;
+    const data = await response.json(); setQuotes(list => [data.quote, ...list]);
+    setQuoteForm({ client: "", description: "", quantity: "1", rate: "", expiresOn: new Date(Date.now() + 30 * 86400000).toISOString().slice(0,10) });
+  }
+
+  async function changeQuoteStatus(quote: Quote, status: Quote["status"]) {
+    const response = await fetch("/api/quotes", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: quote.id, status }) });
+    if (response.ok) setQuotes(list => list.map(item => item.id === quote.id ? { ...item, status } : item));
   }
 
   const projectStats = useMemo(() => projects.map(project => {
@@ -282,6 +298,7 @@ export default function Home() {
         {user.role === "manager" && <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><Icon>⌁</Icon>Overview</button>}
         <button className={view === "timesheet" ? "active" : ""} onClick={() => setView("timesheet")}><Icon>▦</Icon>Timesheet</button>
         <button className={view === "projects" ? "active" : ""} onClick={() => setView("projects")}><Icon>✓</Icon>{user.role === "manager" ? "Projects" : "My tasks"}</button>
+        {user.role === "manager" && <button className={view === "quotes" ? "active" : ""} onClick={() => setView("quotes")}><Icon>◇</Icon>Quotes</button>}
         {user.role === "manager" && <button className={view === "clients" ? "active" : ""} onClick={() => setView("clients")}><Icon>◎</Icon>Clients & rates</button>}
       </nav>
       <div className="sidebar-note"><span className="pulse" /><div><strong>Forecast is live</strong><small>Updated from every entry</small></div></div>
@@ -289,7 +306,7 @@ export default function Home() {
     </aside>
 
     <section className="workspace">
-      <header><div><p className="eyebrow">{view === "overview" ? overviewMonthLabel.toUpperCase() : "AUGUST 2026"}</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : view === "projects" ? (user.role === "manager" ? "Projects & capacity" : "My tasks") : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : view === "projects" ? (user.role === "manager" ? "Forecast delivery and team utilization." : "Focus on the work assigned to you.") : "Know what every hour is worth."}</p></div><div className="header-actions">{view === "overview" && <label className="overview-month">View month<input type="month" aria-label="Overview month" value={overviewMonth} onChange={e => e.target.value && setOverviewMonth(e.target.value)}/></label>}<button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></div></header>
+      <header><div><p className="eyebrow">{view === "overview" ? overviewMonthLabel.toUpperCase() : "ONE PLACE CONCEPTS"}</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : view === "projects" ? (user.role === "manager" ? "Projects & capacity" : "My tasks") : view === "quotes" ? "Quotes" : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : view === "projects" ? (user.role === "manager" ? "Forecast delivery and team utilization." : "Focus on the work assigned to you.") : view === "quotes" ? "Prepare and track straightforward client estimates." : "Know what every hour is worth."}</p></div><div className="header-actions">{view === "overview" && <label className="overview-month">View month<input type="month" aria-label="Overview month" value={overviewMonth} onChange={e => e.target.value && setOverviewMonth(e.target.value)}/></label>}<button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></div></header>
 
       {view === "overview" && <>
         <div className="metrics four">
@@ -331,6 +348,11 @@ export default function Home() {
           <form className="panel project-form" onSubmit={createTask}><div><p className="eyebrow">NEW TASK</p><h2>Assign team work</h2></div><label>Project<select required value={taskForm.projectId} onChange={e => setTaskForm({...taskForm,projectId:e.target.value})}><option value="">Select project…</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Task<input required value={taskForm.title} onChange={e => setTaskForm({...taskForm,title:e.target.value})}/></label><div className="compact-fields"><label>Assignee<select required value={taskForm.assigneeUserId} onChange={e => setTaskForm({...taskForm,assigneeUserId:e.target.value})}><option value="">Select person…</option>{projectPeople.map(person => <option key={person.userId} value={person.userId}>{person.name}</option>)}</select></label><label>Est. hours<input type="number" min="0" required value={taskForm.estimatedHours} onChange={e => setTaskForm({...taskForm,estimatedHours:e.target.value})}/></label><label>Due<input type="date" required value={taskForm.dueDate} onChange={e => setTaskForm({...taskForm,dueDate:e.target.value})}/></label></div><button className="primary">Add task</button></form>
         </div>}
         <div className="project-list">{projectStats.length ? projectStats.map(project => <article className="panel project-card" key={project.id}><div className="project-head"><div><p className="eyebrow">{project.client}</p><h2>{project.name}</h2><span>Due {new Date(project.dueDate+"T12:00:00").toLocaleDateString()}</span></div>{user.role === "manager" && <div className="project-progress"><strong>{project.utilization}%</strong><span>of {project.budgetHours}h budget</span></div>}</div>{user.role === "manager" && <div className="project-bars"><div><span>Logged {project.logged.toFixed(1)}h</span><span>Budget {project.budgetHours}h</span></div><i><b style={{width:`${Math.min(100,project.utilization)}%`}}/></i><small>{project.complete} of {project.tasks.length} tasks complete · {Math.max(0,project.budgetHours-project.logged).toFixed(1)}h remaining</small></div>}<div className="task-list">{project.tasks.length ? project.tasks.map(task => <div className="task-row" key={task.id}><div><strong>{task.title}</strong><span>{projectPeople.find(person => person.userId === task.assigneeUserId)?.name ?? (user.role === "member" ? "Assigned to you" : "Team member")} · {task.estimatedHours}h · Due {new Date(task.dueDate+"T12:00:00").toLocaleDateString()}</span></div><select aria-label={`Status for ${task.title}`} value={task.status} onChange={e => changeTaskStatus(task,e.target.value as ProjectTask["status"])}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="complete">Complete</option></select></div>) : <p className="no-tasks">No tasks assigned yet.</p>}</div></article>) : <article className="panel empty-projects"><h2>{user.role === "manager" ? "No projects yet" : "No tasks assigned"}</h2><p>{user.role === "manager" ? "Create a project to begin forecasting delivery and utilization." : "Your manager can assign work from the Projects view."}</p></article>}</div>
+      </section>}
+
+      {view === "quotes" && user.role === "manager" && <section className="quotes-view">
+        <form className="panel quote-form" onSubmit={createQuote}><div><p className="eyebrow">NEW QUOTE</p><h2>Build a simple estimate</h2><p>One service line, one clear total.</p></div><label>Client<select required value={quoteForm.client} onChange={e => { const client = clients.find(c => c.name === e.target.value); setQuoteForm({...quoteForm,client:e.target.value,rate:String(client?.hourlyRate ?? "")})}}><option value="">Select client…</option>{clients.filter(c => c.active).map(c => <option key={c.id}>{c.name}</option>)}</select></label><label>Description<input required placeholder="e.g. Website strategy and implementation" value={quoteForm.description} onChange={e => setQuoteForm({...quoteForm,description:e.target.value})}/></label><div className="quote-fields"><label>Quantity<input type="number" min="0.25" step="0.25" required value={quoteForm.quantity} onChange={e => setQuoteForm({...quoteForm,quantity:e.target.value})}/></label><label>Rate<input type="number" min="0" step="1" required value={quoteForm.rate} onChange={e => setQuoteForm({...quoteForm,rate:e.target.value})}/></label><label>Valid until<input type="date" required value={quoteForm.expiresOn} onChange={e => setQuoteForm({...quoteForm,expiresOn:e.target.value})}/></label></div><div className="quote-form-total"><span>Quote total</span><strong>{money.format(Number(quoteForm.quantity || 0) * Number(quoteForm.rate || 0))}</strong></div><button className="primary">Create draft quote</button></form>
+        <div className="quote-list">{quotes.length ? quotes.map(quote => <article className="panel quote-card" key={quote.id}><div className="quote-card-head"><div><span className={`quote-status ${quote.status}`}>{quote.status}</span><p>Quote #{String(quote.id).padStart(4,"0")}</p></div><strong>{money.format(quote.quantity * quote.rate)}</strong></div><h2>{quote.client}</h2><p className="quote-description">{quote.description}</p><div className="quote-meta"><span>{quote.quantity} × {money.format(quote.rate)}</span><span>Valid until {new Date(quote.expiresOn+"T12:00:00").toLocaleDateString()}</span></div><div className="quote-actions"><select aria-label={`Status for quote ${quote.id}`} value={quote.status} onChange={e => changeQuoteStatus(quote,e.target.value as Quote["status"])}><option value="draft">Draft</option><option value="sent">Sent</option><option value="accepted">Accepted</option></select><button type="button" onClick={() => window.print()}>Print quote</button></div></article>) : <article className="panel empty-quotes"><h2>No quotes yet</h2><p>Create your first client estimate using the form.</p></article>}</div>
       </section>}
 
       {view === "clients" && user.role === "manager" && <>

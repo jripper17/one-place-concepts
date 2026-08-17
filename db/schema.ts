@@ -56,3 +56,14 @@ export const projectTasks = sqliteTable("project_tasks", {
   dueDate: text("due_date").notNull(),
   status: text("status", { enum: ["todo", "in_progress", "complete"] }).notNull().default("todo"),
 }, table => [index("idx_project_tasks_project_id").on(table.projectId), index("idx_project_tasks_assignee").on(table.assigneeUserId)]);
+
+export const quotes = sqliteTable("quotes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  client: text("client").notNull(),
+  description: text("description").notNull(),
+  quantity: real("quantity").notNull().default(1),
+  rate: real("rate").notNull().default(0),
+  expiresOn: text("expires_on").notNull(),
+  status: text("status", { enum: ["draft", "sent", "accepted"] }).notNull().default("draft"),
+  createdAt: text("created_at").notNull(),
+}, table => [index("idx_quotes_status").on(table.status), index("idx_quotes_client").on(table.client)]);
