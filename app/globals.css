@@ -53,3 +53,21 @@ header { display:flex; justify-content:space-between; align-items:center; margin
 @media (max-width:700px) { .filter-grid{grid-template-columns:1fr 1fr}.timesheet-filters{padding:16px} }
 @media (max-width:700px) { .quote-list{grid-template-columns:1fr}.quote-basics,.quote-item-grid,.quote-pdf-settings,.quote-settings-grid{grid-template-columns:1fr}.quotes-view{gap:12px}.quote-form-total{justify-content:space-between;gap:12px}.quote-form-total span{text-align:left}.quote-edit-banner{align-items:flex-start;flex-direction:column} }
 @media (max-width:700px) { .sidebar{position:fixed;z-index:5;inset:auto 0 0;width:100%;height:65px;padding:7px 12px}.brand,.sidebar-note,.profile{display:none}nav{display:grid;grid-template-columns:repeat(5,1fr)}nav button{justify-content:center;flex-direction:column;gap:2px;padding:5px 2px;font-size:8px}.workspace{margin-left:0;width:100%;padding:26px 16px 90px}header{align-items:flex-start;gap:10px;flex-direction:column}.header-actions{width:100%;align-items:flex-end}.overview-month{flex:1}.overview-month input{width:100%}h1{font-size:27px}.primary{padding:11px 13px}.metrics{gap:10px}.panel{padding:18px}.forecast-panel{display:none}.client-bar{grid-template-columns:27px 1fr 60px}.client-bar .bar,.client-bar span:nth-last-child(2){display:none}.form-row{grid-template-columns:1fr}.file-tools{grid-template-columns:1fr}.file-actions{justify-content:flex-start}.word-export{border-left:0;padding-left:0;width:100%}.table-panel{margin:0 -4px}th,td{padding:13px 12px}.client-snapshot .panel-title button{display:none} }
+
+/* Readable dashboard typography */
+body { font-size:15px; }
+nav button { font-size:14px; }
+.sidebar-note strong,.profile strong { font-size:13px; }
+.sidebar-note small,.profile small { font-size:12px; }
+.eyebrow { font-size:12px!important; }
+header p { font-size:15px; }
+.metric-top { font-size:14px; }
+.metrics small,.overview-empty { font-size:13px; }
+.panel p,.panel small,.panel label,.panel button,.panel input,.panel select,.panel td { font-size:13px!important; line-height:1.45; }
+.panel th { font-size:11px!important; }
+.quote-status,.quote-category,.inactive-pill { font-size:10px; }
+.quote-lines p strong,.quote-lines b,.entry-main strong,.entry-value strong,.member strong,.task-row strong { font-size:13px; }
+.quote-meta,.rate span,.client-bar,.project-head>div>span,.project-bars small { font-size:12px; }
+.file-tools p,.quote-form p,.quote-card p,.empty-quotes p,.client-card p { font-size:13px; }
+.modal label,.modal input,.modal select,.modal label>small { font-size:13px; }
+@media (max-width:700px) { nav button { font-size:10px; } }
