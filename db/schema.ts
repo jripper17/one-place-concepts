@@ -67,3 +67,15 @@ export const quotes = sqliteTable("quotes", {
   status: text("status", { enum: ["draft", "sent", "accepted"] }).notNull().default("draft"),
   createdAt: text("created_at").notNull(),
 }, table => [index("idx_quotes_status").on(table.status), index("idx_quotes_client").on(table.client)]);
+
+export const quoteItems = sqliteTable("quote_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  quoteId: integer("quote_id").notNull().references(() => quotes.id),
+  category: text("category", { enum: ["hardware", "software", "service"] }).notNull(),
+  description: text("description").notNull(),
+  quantity: real("quantity").notNull().default(1),
+  unitCost: real("unit_cost").notNull().default(0),
+  markupPercent: real("markup_percent").notNull().default(0),
+  unitPrice: real("unit_price").notNull().default(0),
+  billing: text("billing", { enum: ["one_time", "monthly"] }).notNull().default("one_time"),
+}, table => [index("idx_quote_items_quote_id").on(table.quoteId)]);
