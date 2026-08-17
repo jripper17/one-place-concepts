@@ -40,6 +40,8 @@ export default function Home() {
   const [fileMessage, setFileMessage] = useState("");
   const [reportClient, setReportClient] = useState("");
   const [federalTaxRate, setFederalTaxRate] = useState(25);
+  const [quotePdfSettings, setQuotePdfSettings] = useState({ quoteCompanyName: "One Place Concepts", quoteTagline: "Time, technology, and business solutions", quoteContactName: "", quoteContactEmail: "" });
+  const [savingQuotePdfSettings, setSavingQuotePdfSettings] = useState(false);
   const [editingClientId, setEditingClientId] = useState<number | null>(null);
   const [clientDraft, setClientDraft] = useState({ hourlyRate: "", monthlyRecurringRevenue: "" });
   const [savingClient, setSavingClient] = useState(false);
@@ -75,6 +77,16 @@ export default function Home() {
       window.removeEventListener("afterprint", finish);
     };
   }, [printQuote]);
+
+  useEffect(() => {
+    if (authStatus !== "signedIn" || user.role !== "manager") return;
+    fetch("/api/settings").then(response => response.json()).then(settings => setQuotePdfSettings({
+      quoteCompanyName: settings.quoteCompanyName ?? "One Place Concepts",
+      quoteTagline: settings.quoteTagline ?? "Time, technology, and business solutions",
+      quoteContactName: settings.quoteContactName ?? "",
+      quoteContactEmail: settings.quoteContactEmail ?? "",
+    })).catch(() => undefined);
+  }, [authStatus, user.role]);
 
   async function changeRole(id: number, role: "manager" | "member") {
     const response = await fetch("/api/team", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, role }) });
@@ -123,6 +135,17 @@ export default function Home() {
   async function saveTaxRate(rate: number) {
     setFederalTaxRate(rate);
     await fetch("/api/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ federalTaxRate: rate }) });
+  }
+
+  async function saveQuotePdfSettings(event: FormEvent) {
+    event.preventDefault();
+    setSavingQuotePdfSettings(true);
+    const response = await fetch("/api/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(quotePdfSettings) });
+    if (response.ok) {
+      const data = await response.json();
+      setQuotePdfSettings({ quoteCompanyName: data.settings.quoteCompanyName, quoteTagline: data.settings.quoteTagline, quoteContactName: data.settings.quoteContactName, quoteContactEmail: data.settings.quoteContactEmail });
+    }
+    setSavingQuotePdfSettings(false);
   }
 
   async function createProject(event: FormEvent) {
@@ -389,6 +412,7 @@ export default function Home() {
       </section>}
 
       {view === "quotes" && user.role === "manager" && <section className="quotes-view">
+        <form className="panel quote-pdf-settings" onSubmit={saveQuotePdfSettings}><div><p className="eyebrow">CLIENT PDF HEADER</p><h2>Company information</h2><p>Edit the company and contact details shown at the top of every client PDF.</p></div><div className="quote-settings-grid"><label>Company name<input required value={quotePdfSettings.quoteCompanyName} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteCompanyName:e.target.value})}/></label><label>Tagline<input value={quotePdfSettings.quoteTagline} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteTagline:e.target.value})}/></label><label>Contact name<input value={quotePdfSettings.quoteContactName} placeholder={user.name} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteContactName:e.target.value})}/></label><label>Contact email<input type="email" value={quotePdfSettings.quoteContactEmail} placeholder={user.email} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteContactEmail:e.target.value})}/></label></div><button className="primary" disabled={savingQuotePdfSettings}>{savingQuotePdfSettings ? "Saving…" : "Save PDF header"}</button></form>
         {editingQuoteId && <div className="quote-edit-banner"><div><strong>Editing draft quote #{String(editingQuoteId).padStart(4,"0")}</strong><span>Changes will update this quote without creating a duplicate.</span></div><div><button type="button" onClick={cancelQuoteEdit}>Cancel</button><button className="primary" type="button" onClick={() => document.querySelector<HTMLFormElement>(".quote-form")?.requestSubmit()}>Update draft</button></div></div>}
         <form className="panel quote-form" onSubmit={createQuote}><div><p className="eyebrow">NEW QUOTE</p><h2>Build a client estimate</h2><p>Add hardware, software, and service line items.</p></div><div className="quote-basics"><label>Client<select required value={quoteForm.client} onChange={e => setQuoteForm({...quoteForm,client:e.target.value})}><option value="">Select client…</option>{clients.filter(c => c.active).map(c => <option key={c.id}>{c.name}</option>)}</select></label><label>Valid until<input type="date" required value={quoteForm.expiresOn} onChange={e => setQuoteForm({...quoteForm,expiresOn:e.target.value})}/></label></div><div className="quote-item-editor">{quoteForm.items.map((item,index) => <fieldset key={index}><div className="quote-item-head"><legend>Line item {index + 1}</legend>{quoteForm.items.length > 1 && <button type="button" onClick={() => setQuoteForm({...quoteForm,items:quoteForm.items.filter((_,i) => i !== index)})}>Remove</button>}</div><div className="quote-item-grid"><label>Category<select value={item.category} onChange={e => updateQuoteItem(index,{category:e.target.value as QuoteDraftItem["category"],billing:e.target.value === "software" ? item.billing : "one_time"})}><option value="hardware">Hardware</option><option value="software">Software</option><option value="service">Service</option></select></label><label className="item-description">Description<input required placeholder="Product or service" value={item.description} onChange={e => updateQuoteItem(index,{description:e.target.value})}/></label><label>Qty<input type="number" min="0.01" step="0.01" required value={item.quantity} onChange={e => updateQuoteItem(index,{quantity:Number(e.target.value)})}/></label><label>Unit cost<input type="number" min="0" step="0.01" required value={item.unitCost} onChange={e => updateQuoteItem(index,{unitCost:Number(e.target.value)},true)}/></label><label>Markup %<input type="number" min="0" step="1" required value={item.markupPercent} onChange={e => updateQuoteItem(index,{markupPercent:Number(e.target.value)},true)}/></label><label>Sell price<input type="number" min="0" step="0.01" required value={item.unitPrice} onChange={e => updateQuoteItem(index,{unitPrice:Number(e.target.value)})}/></label>{item.category === "software" && <label>Billing<select value={item.billing} onChange={e => updateQuoteItem(index,{billing:e.target.value as QuoteDraftItem["billing"]})}><option value="one_time">One time</option><option value="monthly">Monthly</option></select></label>}<div className="item-total"><span>Line total</span><strong>{money.format(item.quantity * item.unitPrice)}{item.billing === "monthly" ? "/mo" : ""}</strong></div></div></fieldset>)}</div><button className="add-quote-item" type="button" onClick={() => setQuoteForm({...quoteForm,items:[...quoteForm.items,blankQuoteItem()]})}>＋ Add line item</button><div className="quote-form-total"><span><small>One-time total</small><strong>{money.format(quoteForm.items.filter(item => item.billing === "one_time").reduce((sum,item) => sum + item.quantity * item.unitPrice,0))}</strong></span><span><small>Monthly recurring</small><strong>{money.format(quoteForm.items.filter(item => item.billing === "monthly").reduce((sum,item) => sum + item.quantity * item.unitPrice,0))}/mo</strong></span></div><button className="primary">Create draft quote</button></form>
         <div className="quote-list">{quotes.length ? quotes.map(quote => { const oneTime = quote.items.filter(item => item.billing === "one_time").reduce((sum,item) => sum + item.quantity * item.unitPrice,0); const monthly = quote.items.filter(item => item.billing === "monthly").reduce((sum,item) => sum + item.quantity * item.unitPrice,0); return <article className="panel quote-card" key={quote.id}><div className="quote-card-head"><div><span className={`quote-status ${quote.status}`}>{quote.status}</span><p>Quote #{String(quote.id).padStart(4,"0")}</p></div><div className="quote-card-totals"><strong>{money.format(oneTime)}</strong>{monthly > 0 && <span>+ {money.format(monthly)}/mo</span>}</div></div><h2>{quote.client}</h2><div className="quote-lines">{quote.items.map(item => <div key={item.id}><span className={`quote-category ${item.category}`}>{item.category}</span><p><strong>{item.description}</strong><small>{item.quantity} × {money.format(item.unitPrice)}{item.billing === "monthly" ? " monthly" : ""}</small></p><b>{money.format(item.quantity * item.unitPrice)}{item.billing === "monthly" ? "/mo" : ""}</b></div>)}</div><div className="quote-meta"><span>{quote.items.length} line item{quote.items.length === 1 ? "" : "s"}</span><span>Valid until {new Date(quote.expiresOn+"T12:00:00").toLocaleDateString()}</span></div><div className="quote-actions"><select aria-label={`Status for quote ${quote.id}`} value={quote.status} onChange={e => changeQuoteStatus(quote,e.target.value as Quote["status"])}><option value="draft">Draft</option><option value="sent">Sent</option><option value="accepted">Accepted</option></select>{quote.status === "draft" && <button type="button" onClick={() => editQuote(quote)}>Edit draft</button>}<button type="button" onClick={() => setPrintQuote(quote)}>Client PDF</button></div></article> }) : <article className="panel empty-quotes"><h2>No quotes yet</h2><p>Create your first client estimate using the form.</p></article>}</div>
@@ -419,7 +443,7 @@ export default function Home() {
       const monthly = printQuote.items.filter(item => item.billing === "monthly").reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       return <article className="quote-document" aria-label={`Client quote ${printQuote.id}`}>
         <header className="quote-document-header">
-          <div className="quote-company"><img src="/opc-logo.jpeg" alt="One Place Concepts"/><div><strong>One Place Concepts</strong><span>Time, technology, and business solutions</span><span>{user.name} · {user.email}</span></div></div>
+          <div className="quote-company"><img src="/opc-logo.jpeg" alt={quotePdfSettings.quoteCompanyName}/><div><strong>{quotePdfSettings.quoteCompanyName}</strong>{quotePdfSettings.quoteTagline && <span>{quotePdfSettings.quoteTagline}</span>}<span>{quotePdfSettings.quoteContactName || user.name}{(quotePdfSettings.quoteContactEmail || user.email) && ` · ${quotePdfSettings.quoteContactEmail || user.email}`}</span></div></div>
           <div className="quote-title"><span>QUOTE</span><strong>#{String(printQuote.id).padStart(4,"0")}</strong></div>
         </header>
         <section className="quote-parties">

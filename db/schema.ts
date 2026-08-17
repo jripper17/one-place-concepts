@@ -35,6 +35,10 @@ export const timeEntries = sqliteTable("time_entries", {
 export const businessSettings = sqliteTable("business_settings", {
   id: integer("id").primaryKey().default(1),
   federalTaxRate: real("federal_tax_rate").notNull().default(25),
+  quoteCompanyName: text("quote_company_name").notNull().default("One Place Concepts"),
+  quoteTagline: text("quote_tagline").notNull().default("Time, technology, and business solutions"),
+  quoteContactName: text("quote_contact_name").notNull().default(""),
+  quoteContactEmail: text("quote_contact_email").notNull().default(""),
 });
 
 export const projects = sqliteTable("projects", {

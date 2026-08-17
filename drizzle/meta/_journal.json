@@ -71,6 +71,13 @@
       "when": 1786967058940,
       "tag": "0009_fine_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1786980107193,
+      "tag": "0010_even_silverclaw",
+      "breakpoints": true
     }
   ]
 }
