@@ -22,6 +22,15 @@ function cleanEntryText(value: unknown) {
 
 function Icon({ children }: { children: React.ReactNode }) { return <span className="icon" aria-hidden="true">{children}</span>; }
 
+function blobDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 export default function Home() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [view, setView] = useState<"overview" | "timesheet" | "projects" | "quotes" | "clients">("overview");
@@ -54,7 +63,6 @@ export default function Home() {
   const [timesheetFilter, setTimesheetFilter] = useState({ client: "", project: "", month: "", from: "", to: "", sort: "date_desc" });
   const [overviewMonth, setOverviewMonth] = useState(new Date().toISOString().slice(0, 7));
   const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [printQuote, setPrintQuote] = useState<Quote | null>(null);
   const [editingQuoteId, setEditingQuoteId] = useState<number | null>(null);
   const [quoteForm, setQuoteForm] = useState({ client: "", expiresOn: new Date(Date.now() + 30 * 86400000).toISOString().slice(0,10), items: [blankQuoteItem()] });
   const importInput = useRef<HTMLInputElement>(null);
@@ -66,17 +74,6 @@ export default function Home() {
       if (data?.entries) setEntries(data.entries.map((e: Entry) => ({ ...e, project: cleanEntryText(e.project), description: cleanEntryText(e.description), hours: Number(e.hours), rate: Number(e.rate), billable: Boolean(e.billable) })));
     }).catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    if (!printQuote) return;
-    const timer = window.setTimeout(() => window.print(), 50);
-    const finish = () => setPrintQuote(null);
-    window.addEventListener("afterprint", finish, { once: true });
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("afterprint", finish);
-    };
-  }, [printQuote]);
 
   useEffect(() => {
     if (authStatus !== "signedIn" || user.role !== "manager") return;
@@ -198,6 +195,57 @@ export default function Home() {
   async function changeQuoteStatus(quote: Quote, status: Quote["status"]) {
     const response = await fetch("/api/quotes", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: quote.id, status }) });
     if (response.ok) setQuotes(list => list.map(item => item.id === quote.id ? { ...item, status } : item));
+  }
+
+  async function downloadQuotePdf(quote: Quote) {
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({ unit: "pt", format: "letter" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 48;
+    const companyName = quotePdfSettings.quoteCompanyName || "One Place Concepts";
+    const contactName = quotePdfSettings.quoteContactName || user.name;
+    const contactEmail = quotePdfSettings.quoteContactEmail || user.email;
+    const client = clients.find(item => item.name === quote.client);
+    const oneTime = quote.items.filter(item => item.billing === "one_time").reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const monthly = quote.items.filter(item => item.billing === "monthly").reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const green = [86, 133, 19] as const;
+    const navy = [18, 45, 58] as const;
+    const muted = [101, 116, 108] as const;
+
+    try {
+      const logo = await blobDataUrl(await (await fetch("/opc-logo.jpeg")).blob());
+      pdf.addImage(logo, "JPEG", margin, 44, 54, 54);
+    } catch { /* The quote remains usable if the logo cannot be loaded. */ }
+    pdf.setTextColor(...navy); pdf.setFont("helvetica", "bold"); pdf.setFontSize(22); pdf.text(companyName, 116, 62);
+    pdf.setTextColor(...muted); pdf.setFont("helvetica", "normal"); pdf.setFontSize(10);
+    if (quotePdfSettings.quoteTagline) pdf.text(quotePdfSettings.quoteTagline, 116, 79);
+    pdf.text([contactName, contactEmail].filter(Boolean).join(" | "), 116, 94);
+    pdf.setTextColor(...green); pdf.setFont("helvetica", "bold"); pdf.setFontSize(10); pdf.text("QUOTE", pageWidth - margin, 58, { align: "right" });
+    pdf.setTextColor(...navy); pdf.setFontSize(22); pdf.text(`#${String(quote.id).padStart(4, "0")}`, pageWidth - margin, 84, { align: "right" });
+    pdf.setDrawColor(...green); pdf.setLineWidth(2); pdf.line(margin, 116, pageWidth - margin, 116);
+
+    pdf.setTextColor(...green); pdf.setFontSize(8); pdf.text("PREPARED FOR", margin, 146);
+    pdf.setTextColor(...navy); pdf.setFontSize(16); pdf.text(quote.client, margin, 168);
+    if (client?.description) { pdf.setTextColor(...muted); pdf.setFont("helvetica", "normal"); pdf.setFontSize(9); pdf.text(pdf.splitTextToSize(client.description, 260), margin, 184); }
+    const metaX = pageWidth - 230;
+    pdf.setFontSize(9); pdf.setTextColor(...muted); pdf.text("Issued", metaX, 146); pdf.text("Valid until", metaX, 164); pdf.text("Status", metaX, 182);
+    pdf.setTextColor(...navy); pdf.setFont("helvetica", "bold"); pdf.text(new Date(quote.createdAt).toLocaleDateString(), pageWidth - margin, 146, { align: "right" }); pdf.text(new Date(`${quote.expiresOn}T12:00:00`).toLocaleDateString(), pageWidth - margin, 164, { align: "right" }); pdf.text(quote.status.toUpperCase(), pageWidth - margin, 182, { align: "right" });
+
+    let y = 220;
+    const drawTableHeader = () => { pdf.setFillColor(...navy); pdf.rect(margin, y, pageWidth - margin * 2, 24, "F"); pdf.setTextColor(255,255,255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(8); pdf.text("ITEM", margin + 10, y + 16); pdf.text("BILLING", 330, y + 16); pdf.text("QTY", 405, y + 16, { align: "right" }); pdf.text("UNIT PRICE", 480, y + 16, { align: "right" }); pdf.text("AMOUNT", pageWidth - margin - 10, y + 16, { align: "right" }); y += 24; };
+    drawTableHeader();
+    for (const item of quote.items) {
+      if (y > 650) { pdf.addPage(); y = 52; drawTableHeader(); }
+      pdf.setTextColor(...navy); pdf.setFont("helvetica", "bold"); pdf.setFontSize(9); pdf.text(pdf.splitTextToSize(item.description, 220), margin + 10, y + 18);
+      pdf.setTextColor(...muted); pdf.setFont("helvetica", "normal"); pdf.setFontSize(7); pdf.text(item.category.toUpperCase(), margin + 10, y + 34);
+      pdf.setFontSize(8); pdf.text(item.billing === "monthly" ? "Monthly" : "One time", 330, y + 24); pdf.text(String(item.quantity), 405, y + 24, { align: "right" }); pdf.text(money.format(item.unitPrice), 480, y + 24, { align: "right" }); pdf.setTextColor(...navy); pdf.setFont("helvetica", "bold"); pdf.text(`${money.format(item.quantity * item.unitPrice)}${item.billing === "monthly" ? "/mo" : ""}`, pageWidth - margin - 10, y + 24, { align: "right" });
+      pdf.setDrawColor(224,229,226); pdf.line(margin, y + 44, pageWidth - margin, y + 44); y += 45;
+    }
+    y += 18; pdf.setFont("helvetica", "normal"); pdf.setTextColor(...muted); pdf.setFontSize(9); pdf.text("One-time total", 405, y); pdf.setFont("helvetica", "bold"); pdf.setTextColor(...navy); pdf.setFontSize(15); pdf.text(money.format(oneTime), pageWidth - margin, y, { align: "right" });
+    if (monthly > 0) { y += 26; pdf.setFont("helvetica", "normal"); pdf.setTextColor(...muted); pdf.setFontSize(9); pdf.text("Monthly recurring", 405, y); pdf.setFont("helvetica", "bold"); pdf.setTextColor(18,107,130); pdf.setFontSize(15); pdf.text(`${money.format(monthly)}/mo`, pageWidth - margin, y, { align: "right" }); }
+    y = Math.max(y + 48, 680); pdf.setDrawColor(224,229,226); pdf.line(margin, y, pageWidth - margin, y); pdf.setTextColor(...navy); pdf.setFont("helvetica", "bold"); pdf.setFontSize(10); pdf.text("Thank you for the opportunity to work with you.", margin, y + 22); pdf.setTextColor(...muted); pdf.setFont("helvetica", "normal"); pdf.setFontSize(7); pdf.text(pdf.splitTextToSize("Pricing is valid through the date shown above. Taxes, shipping, and third-party fees are excluded unless specifically listed. Recurring services are billed monthly.", pageWidth - margin * 2), margin, y + 37);
+    const filename = `quote-${String(quote.id).padStart(4, "0")}-${quote.client.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "client"}.pdf`;
+    pdf.save(filename);
   }
 
   const projectStats = useMemo(() => projects.map(project => {
@@ -415,7 +463,7 @@ export default function Home() {
         <form className="panel quote-pdf-settings" onSubmit={saveQuotePdfSettings}><div><p className="eyebrow">CLIENT PDF HEADER</p><h2>Company information</h2><p>Edit the company and contact details shown at the top of every client PDF.</p></div><div className="quote-settings-grid"><label>Company name<input required value={quotePdfSettings.quoteCompanyName} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteCompanyName:e.target.value})}/></label><label>Tagline<input value={quotePdfSettings.quoteTagline} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteTagline:e.target.value})}/></label><label>Contact name<input value={quotePdfSettings.quoteContactName} placeholder={user.name} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteContactName:e.target.value})}/></label><label>Contact email<input type="email" value={quotePdfSettings.quoteContactEmail} placeholder={user.email} onChange={e => setQuotePdfSettings({...quotePdfSettings,quoteContactEmail:e.target.value})}/></label></div><button className="primary" disabled={savingQuotePdfSettings}>{savingQuotePdfSettings ? "Saving…" : "Save PDF header"}</button></form>
         {editingQuoteId && <div className="quote-edit-banner"><div><strong>Editing draft quote #{String(editingQuoteId).padStart(4,"0")}</strong><span>Changes will update this quote without creating a duplicate.</span></div><div><button type="button" onClick={cancelQuoteEdit}>Cancel</button><button className="primary" type="button" onClick={() => document.querySelector<HTMLFormElement>(".quote-form")?.requestSubmit()}>Update draft</button></div></div>}
         <form className="panel quote-form" onSubmit={createQuote}><div><p className="eyebrow">NEW QUOTE</p><h2>Build a client estimate</h2><p>Add hardware, software, and service line items.</p></div><div className="quote-basics"><label>Client<select required value={quoteForm.client} onChange={e => setQuoteForm({...quoteForm,client:e.target.value})}><option value="">Select client…</option>{clients.filter(c => c.active).map(c => <option key={c.id}>{c.name}</option>)}</select></label><label>Valid until<input type="date" required value={quoteForm.expiresOn} onChange={e => setQuoteForm({...quoteForm,expiresOn:e.target.value})}/></label></div><div className="quote-item-editor">{quoteForm.items.map((item,index) => <fieldset key={index}><div className="quote-item-head"><legend>Line item {index + 1}</legend>{quoteForm.items.length > 1 && <button type="button" onClick={() => setQuoteForm({...quoteForm,items:quoteForm.items.filter((_,i) => i !== index)})}>Remove</button>}</div><div className="quote-item-grid"><label>Category<select value={item.category} onChange={e => updateQuoteItem(index,{category:e.target.value as QuoteDraftItem["category"],billing:e.target.value === "software" ? item.billing : "one_time"})}><option value="hardware">Hardware</option><option value="software">Software</option><option value="service">Service</option></select></label><label className="item-description">Description<input required placeholder="Product or service" value={item.description} onChange={e => updateQuoteItem(index,{description:e.target.value})}/></label><label>Qty<input type="number" min="0.01" step="0.01" required value={item.quantity} onChange={e => updateQuoteItem(index,{quantity:Number(e.target.value)})}/></label><label>Unit cost<input type="number" min="0" step="0.01" required value={item.unitCost} onChange={e => updateQuoteItem(index,{unitCost:Number(e.target.value)},true)}/></label><label>Markup %<input type="number" min="0" step="1" required value={item.markupPercent} onChange={e => updateQuoteItem(index,{markupPercent:Number(e.target.value)},true)}/></label><label>Sell price<input type="number" min="0" step="0.01" required value={item.unitPrice} onChange={e => updateQuoteItem(index,{unitPrice:Number(e.target.value)})}/></label>{item.category === "software" && <label>Billing<select value={item.billing} onChange={e => updateQuoteItem(index,{billing:e.target.value as QuoteDraftItem["billing"]})}><option value="one_time">One time</option><option value="monthly">Monthly</option></select></label>}<div className="item-total"><span>Line total</span><strong>{money.format(item.quantity * item.unitPrice)}{item.billing === "monthly" ? "/mo" : ""}</strong></div></div></fieldset>)}</div><button className="add-quote-item" type="button" onClick={() => setQuoteForm({...quoteForm,items:[...quoteForm.items,blankQuoteItem()]})}>＋ Add line item</button><div className="quote-form-total"><span><small>One-time total</small><strong>{money.format(quoteForm.items.filter(item => item.billing === "one_time").reduce((sum,item) => sum + item.quantity * item.unitPrice,0))}</strong></span><span><small>Monthly recurring</small><strong>{money.format(quoteForm.items.filter(item => item.billing === "monthly").reduce((sum,item) => sum + item.quantity * item.unitPrice,0))}/mo</strong></span></div><button className="primary">Create draft quote</button></form>
-        <div className="quote-list">{quotes.length ? quotes.map(quote => { const oneTime = quote.items.filter(item => item.billing === "one_time").reduce((sum,item) => sum + item.quantity * item.unitPrice,0); const monthly = quote.items.filter(item => item.billing === "monthly").reduce((sum,item) => sum + item.quantity * item.unitPrice,0); return <article className="panel quote-card" key={quote.id}><div className="quote-card-head"><div><span className={`quote-status ${quote.status}`}>{quote.status}</span><p>Quote #{String(quote.id).padStart(4,"0")}</p></div><div className="quote-card-totals"><strong>{money.format(oneTime)}</strong>{monthly > 0 && <span>+ {money.format(monthly)}/mo</span>}</div></div><h2>{quote.client}</h2><div className="quote-lines">{quote.items.map(item => <div key={item.id}><span className={`quote-category ${item.category}`}>{item.category}</span><p><strong>{item.description}</strong><small>{item.quantity} × {money.format(item.unitPrice)}{item.billing === "monthly" ? " monthly" : ""}</small></p><b>{money.format(item.quantity * item.unitPrice)}{item.billing === "monthly" ? "/mo" : ""}</b></div>)}</div><div className="quote-meta"><span>{quote.items.length} line item{quote.items.length === 1 ? "" : "s"}</span><span>Valid until {new Date(quote.expiresOn+"T12:00:00").toLocaleDateString()}</span></div><div className="quote-actions"><select aria-label={`Status for quote ${quote.id}`} value={quote.status} onChange={e => changeQuoteStatus(quote,e.target.value as Quote["status"])}><option value="draft">Draft</option><option value="sent">Sent</option><option value="accepted">Accepted</option></select>{quote.status === "draft" && <button type="button" onClick={() => editQuote(quote)}>Edit draft</button>}<button type="button" onClick={() => setPrintQuote(quote)}>Client PDF</button></div></article> }) : <article className="panel empty-quotes"><h2>No quotes yet</h2><p>Create your first client estimate using the form.</p></article>}</div>
+        <div className="quote-list">{quotes.length ? quotes.map(quote => { const oneTime = quote.items.filter(item => item.billing === "one_time").reduce((sum,item) => sum + item.quantity * item.unitPrice,0); const monthly = quote.items.filter(item => item.billing === "monthly").reduce((sum,item) => sum + item.quantity * item.unitPrice,0); return <article className="panel quote-card" key={quote.id}><div className="quote-card-head"><div><span className={`quote-status ${quote.status}`}>{quote.status}</span><p>Quote #{String(quote.id).padStart(4,"0")}</p></div><div className="quote-card-totals"><strong>{money.format(oneTime)}</strong>{monthly > 0 && <span>+ {money.format(monthly)}/mo</span>}</div></div><h2>{quote.client}</h2><div className="quote-lines">{quote.items.map(item => <div key={item.id}><span className={`quote-category ${item.category}`}>{item.category}</span><p><strong>{item.description}</strong><small>{item.quantity} × {money.format(item.unitPrice)}{item.billing === "monthly" ? " monthly" : ""}</small></p><b>{money.format(item.quantity * item.unitPrice)}{item.billing === "monthly" ? "/mo" : ""}</b></div>)}</div><div className="quote-meta"><span>{quote.items.length} line item{quote.items.length === 1 ? "" : "s"}</span><span>Valid until {new Date(quote.expiresOn+"T12:00:00").toLocaleDateString()}</span></div><div className="quote-actions"><select aria-label={`Status for quote ${quote.id}`} value={quote.status} onChange={e => changeQuoteStatus(quote,e.target.value as Quote["status"])}><option value="draft">Draft</option><option value="sent">Sent</option><option value="accepted">Accepted</option></select>{quote.status === "draft" && <button type="button" onClick={() => editQuote(quote)}>Edit draft</button>}<button type="button" onClick={() => downloadQuotePdf(quote)}>Download PDF</button></div></article> }) : <article className="panel empty-quotes"><h2>No quotes yet</h2><p>Create your first client estimate using the form.</p></article>}</div>
       </section>}
 
       {view === "clients" && user.role === "manager" && <>
@@ -437,24 +485,6 @@ export default function Home() {
     </section>
 
     {open && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setOpen(false)}><form className="modal" onSubmit={saveEntry}><div className="modal-head"><div><p className="eyebrow">{editingEntry ? "EDIT ENTRY" : "NEW ENTRY"}</p><h2>{editingEntry ? "Update your time" : "Log your time"}</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close">×</button></div><label>Date<input type="date" required value={form.date} onChange={e => setForm({...form, date: e.target.value})}/></label><div className="form-row"><label>Client<select value={form.client} onChange={e => { const selected = clients.find(c => c.name === e.target.value); setForm({...form, client:e.target.value, project:"", rate:String(selected?.hourlyRate ?? 0)})}}>{clients.map(c => <option key={c.id}>{c.name}</option>)}<option>Internal</option></select></label><label>Project<input required list="entry-project-options" placeholder="Choose or enter a project" value={form.project} onChange={e => setForm({...form, project:e.target.value})}/><datalist id="entry-project-options">{entryProjectOptions.map(project => <option key={project} value={project}/>)}</datalist><small>Select a previous project or type a new one.</small></label></div><label>What did you work on?<input autoFocus required placeholder="e.g. Client workshop and notes" value={form.description} onChange={e => setForm({...form, description:e.target.value})}/></label><div className="form-row"><label>Hours<input type="number" step="0.25" min="0.25" required placeholder="0.0" value={form.hours} onChange={e => setForm({...form, hours:e.target.value})}/></label><label>Hourly rate<input type="number" min="0" required value={form.rate} onChange={e => setForm({...form, rate:e.target.value})}/></label></div><label className="check"><input type="checkbox" checked={form.billable} onChange={e => setForm({...form, billable:e.target.checked})}/><span>Billable time</span><small>Counts toward revenue and forecast</small></label><button className="primary submit" type="submit">{editingEntry ? "Update time entry" : "Save time entry"}</button></form></div>}
-    {printQuote && (() => {
-      const client = clients.find(item => item.name === printQuote.client);
-      const oneTime = printQuote.items.filter(item => item.billing === "one_time").reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      const monthly = printQuote.items.filter(item => item.billing === "monthly").reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      return <article className="quote-document" aria-label={`Client quote ${printQuote.id}`}>
-        <header className="quote-document-header">
-          <div className="quote-company"><img src="/opc-logo.jpeg" alt={quotePdfSettings.quoteCompanyName}/><div><strong>{quotePdfSettings.quoteCompanyName}</strong>{quotePdfSettings.quoteTagline && <span>{quotePdfSettings.quoteTagline}</span>}<span>{quotePdfSettings.quoteContactName || user.name}{(quotePdfSettings.quoteContactEmail || user.email) && ` · ${quotePdfSettings.quoteContactEmail || user.email}`}</span></div></div>
-          <div className="quote-title"><span>QUOTE</span><strong>#{String(printQuote.id).padStart(4,"0")}</strong></div>
-        </header>
-        <section className="quote-parties">
-          <div><span>PREPARED FOR</span><strong>{printQuote.client}</strong>{client?.description && <p>{client.description}</p>}</div>
-          <dl><div><dt>Issued</dt><dd>{new Date(printQuote.createdAt).toLocaleDateString()}</dd></div><div><dt>Valid until</dt><dd>{new Date(printQuote.expiresOn+"T12:00:00").toLocaleDateString()}</dd></div><div><dt>Status</dt><dd>{printQuote.status}</dd></div></dl>
-        </section>
-        <table className="quote-document-lines"><thead><tr><th>Item</th><th>Billing</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>{printQuote.items.map(item => <tr key={item.id}><td><strong>{item.description}</strong><span>{item.category}</span></td><td>{item.billing === "monthly" ? "Monthly" : "One time"}</td><td>{item.quantity}</td><td>{money.format(item.unitPrice)}</td><td>{money.format(item.quantity * item.unitPrice)}{item.billing === "monthly" ? "/mo" : ""}</td></tr>)}</tbody></table>
-        <section className="quote-document-totals"><div><span>One-time total</span><strong>{money.format(oneTime)}</strong></div>{monthly > 0 && <div className="monthly"><span>Monthly recurring</span><strong>{money.format(monthly)}/mo</strong></div>}</section>
-        <footer><strong>Thank you for the opportunity to work with you.</strong><p>Pricing is valid through the date shown above. Taxes, shipping, and third-party fees are excluded unless specifically listed. Recurring services are billed monthly.</p></footer>
-      </article>;
-    })()}
     {saved && <div className="toast">✓ Time entry saved</div>}
   </main>;
 }
