@@ -15,6 +15,12 @@ type QuoteDraftItem = Omit<QuoteItem, "id" | "quoteId">;
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const blankQuoteItem = (): QuoteDraftItem => ({ category: "service", description: "", quantity: 1, unitCost: 0, markupPercent: 0, unitPrice: 0, billing: "one_time" });
 
+function greetingForHour(hour: number) {
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 function cleanEntryText(value: unknown) {
   const text = typeof value === "string" ? value.trim() : "";
   return text.toLowerCase() === "undefined" || text.toLowerCase() === "null" ? "" : text;
@@ -62,11 +68,19 @@ export default function Home() {
   const [taskForm, setTaskForm] = useState({ projectId: "", title: "", assigneeUserId: "", estimatedHours: "", dueDate: "" });
   const [timesheetFilter, setTimesheetFilter] = useState({ client: "", project: "", month: "", from: "", to: "", sort: "date_desc" });
   const [overviewMonth, setOverviewMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [greeting, setGreeting] = useState("Hello");
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [editingQuoteId, setEditingQuoteId] = useState<number | null>(null);
   const [quoteForm, setQuoteForm] = useState({ client: "", expiresOn: new Date(Date.now() + 30 * 86400000).toISOString().slice(0,10), items: [blankQuoteItem()] });
   const importInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), client: "", project: "", description: "", hours: "", rate: "0", billable: true });
+
+  useEffect(() => {
+    const updateGreeting = () => setGreeting(greetingForHour(new Date().getHours()));
+    updateGreeting();
+    const timer = window.setInterval(updateGreeting, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     fetch("/api/session").then(async r => ({ ok: r.ok, data: await r.json() })).then(({ ok, data }) => { if (!ok || !data.user) { setAuthStatus("signedOut"); return; } setAuthStatus("signedIn"); setUser(data.user); setView(data.user.role === "manager" ? "overview" : "timesheet"); fetch("/api/clients").then(r => r.json()).then(c => setClients(c.clients ?? [])); fetch("/api/projects").then(r => r.json()).then(p => { setProjects(p.projects ?? []); setProjectTasks(p.tasks ?? []); setProjectPeople(p.people ?? []); setProjectHours(p.entries ?? []); }); if (data.user.role === "manager") { fetch("/api/team").then(r => r.json()).then(t => setMembers(t.members ?? [])); fetch("/api/ninjaone").then(r => r.json()).then(n => setNinjaConfigured(Boolean(n.configured))); fetch("/api/settings").then(r => r.json()).then(s => setFederalTaxRate(Number(s.federalTaxRate ?? 25))); fetch("/api/quotes").then(r => r.json()).then(q => setQuotes(q.quotes ?? [])); } }).catch(() => setAuthStatus("signedOut"));
@@ -415,7 +429,7 @@ export default function Home() {
     </aside>
 
     <section className="workspace">
-      <header><div><p className="eyebrow">{view === "overview" ? overviewMonthLabel.toUpperCase() : "ONE PLACE CONCEPTS"}</p><h1>{view === "overview" ? "Good morning, Jason." : view === "timesheet" ? "Your timesheet" : view === "projects" ? (user.role === "manager" ? "Projects & capacity" : "My tasks") : view === "quotes" ? "Quotes" : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : view === "projects" ? (user.role === "manager" ? "Forecast delivery and team utilization." : "Focus on the work assigned to you.") : view === "quotes" ? "Prepare and track straightforward client estimates." : "Know what every hour is worth."}</p></div><div className="header-actions">{view === "overview" && <label className="overview-month">View month<input type="month" aria-label="Overview month" value={overviewMonth} onChange={e => e.target.value && setOverviewMonth(e.target.value)}/></label>}<button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></div></header>
+      <header><div><p className="eyebrow">{view === "overview" ? overviewMonthLabel.toUpperCase() : "ONE PLACE CONCEPTS"}</p><h1>{view === "overview" ? `${greeting}, Jason.` : view === "timesheet" ? "Your timesheet" : view === "projects" ? (user.role === "manager" ? "Projects & capacity" : "My tasks") : view === "quotes" ? "Quotes" : "Clients & rates"}</h1><p>{view === "overview" ? "Here’s how your month is shaping up." : view === "timesheet" ? "Review and manage every hour in one place." : view === "projects" ? (user.role === "manager" ? "Forecast delivery and team utilization." : "Focus on the work assigned to you.") : view === "quotes" ? "Prepare and track straightforward client estimates." : "Know what every hour is worth."}</p></div><div className="header-actions">{view === "overview" && <label className="overview-month">View month<input type="month" aria-label="Overview month" value={overviewMonth} onChange={e => e.target.value && setOverviewMonth(e.target.value)}/></label>}<button className="primary" onClick={openNewEntry}><span>＋</span> Log time</button></div></header>
 
       {view === "overview" && <>
         <div className="metrics four">
